@@ -19,13 +19,14 @@ static void usage(const char *argv0)
                   "  %s fit-db market.db model.mars [table]\n"
                   "  %s replay-db market.db model.mars trades.csv [table]\n"
                   "  %s inspect model.mars\n\n"
-                  "default db table: market_bars\n"
+                  "default db source: market_bars; falls back to Ethereum/FRED features\n"
                   "defaults: ES/MES-like 1-second bars, horizon=%u bars, tick=%.8f\n",
                   argv0, argv0, argv0,
                   MARS_DEFAULT_HORIZON, MARS_DEFAULT_TICK_SIZE);
     (void)fprintf(stderr,
                   "\ndb commands:\n"
                   "  %s db-init market.db\n"
+                  "  %s db-summary market.db\n"
                   "  %s eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]\n"
                   "  %s eth-export market.db ethblocks.csv\n"
                   "  %s fred-update market.db SERIES[,SERIES...]\n"
@@ -33,7 +34,7 @@ static void usage(const char *argv0)
                   "env:\n"
                   "  ETH_RPC_URL     Ethereum JSON-RPC endpoint for eth-update\n"
                   "  FRED_API_KEY    FRED API key for fred-update\n",
-                  argv0, argv0, argv0, argv0, argv0);
+                  argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 static int parse_block_arg(const char *s, uint64_t *out)
@@ -92,6 +93,12 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
         st = mars_db_init(argv[2]);
+    } else if (strcmp(argv[1], "db-summary") == 0) {
+        if (argc != 3) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        st = mars_db_summary(argv[2]);
     } else if (strcmp(argv[1], "eth-update") == 0) {
         const char *rpc_url;
         uint64_t from_block;

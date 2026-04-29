@@ -5,7 +5,7 @@
 #include "store.hpp"
 #include "report.hpp"
 
-void Reporter::printStats(const char *name, const mars_bt_stats_t *s)
+void report::print_stats(const char *name, const mars_bt_stats_t *s)
 {
     if ((name == NULL) || (s == NULL)) {
         return;
@@ -45,7 +45,7 @@ static void print_reg_feature_name(uint32_t j)
 }
 
 
-mars_status_t Reporter::inspectModel(const char *model_path)
+mars_status_t report::inspect_model(const char *model_path)
 {
     mars_model_t m;
     uint32_t i;
@@ -53,7 +53,7 @@ mars_status_t Reporter::inspectModel(const char *model_path)
     mars_status_t st;
 
     memset(&m, 0, sizeof(m));
-    st = ModelStore::load(model_path, &m);
+    st = store::load(model_path, &m);
     if (st != MARS_OK) {
         return st;
     }

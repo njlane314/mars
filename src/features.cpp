@@ -85,7 +85,7 @@ static double time_cos(uint64_t ts)
 }
 
 
-mars_status_t FeatureBuilder::make(mars_data_t *d, const mars_config_t *cfg)
+mars_status_t features::make(mars_data_t *d, const mars_config_t *cfg)
 {
     double *ret1 = NULL;
     double *volume_log = NULL;
@@ -210,6 +210,14 @@ mars_status_t FeatureBuilder::make(mars_data_t *d, const mars_config_t *cfg)
         r->base[13] = r->spread_ticks;
         r->base[14] = time_sin(r->ts);
         r->base[15] = time_cos(r->ts);
+        r->base[16] = r->aux[0];
+        r->base[17] = r->aux[1];
+        r->base[18] = r->aux[2];
+        r->base[19] = r->aux[3];
+        r->base[20] = r->aux[4];
+        r->base[21] = r->aux[5];
+        r->base[22] = r->aux[6];
+        r->base[23] = r->aux[7];
 
         if (cfg->horizon + t + 1U < d->n) {
             r->label_ticks = (d->row[t + cfg->horizon + 1U].mid -

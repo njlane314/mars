@@ -18,18 +18,14 @@
 
 namespace {
 
-struct HttpBuf final {
-    std::string body;
-};
-
 static size_t http_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
-    HttpBuf *buf = static_cast<HttpBuf *>(userdata);
+    std::string *buf = static_cast<std::string *>(userdata);
     const size_t n = size * nmemb;
     if (buf == NULL) {
         return 0U;
     }
-    buf->body.append(ptr, n);
+    buf->append(ptr, n);
     return n;
 }
 
@@ -39,7 +35,7 @@ static mars_status_t http_post_json(const char *url, const std::string &payload,
     CURLcode rc;
     struct curl_slist *headers = NULL;
     long code = 0L;
-    HttpBuf buf;
+    std::string buf;
 
     if ((url == NULL) || (out == NULL)) {
         return MARS_ERR_ARG;
@@ -75,7 +71,7 @@ static mars_status_t http_post_json(const char *url, const std::string &payload,
         return MARS_ERR_IO;
     }
 
-    *out = buf.body;
+    *out = buf;
     return MARS_OK;
 }
 
@@ -84,7 +80,7 @@ static mars_status_t http_get(const std::string &url, std::string *out)
     CURL *curl;
     CURLcode rc;
     long code = 0L;
-    HttpBuf buf;
+    std::string buf;
 
     if (out == NULL) {
         return MARS_ERR_ARG;
@@ -110,7 +106,7 @@ static mars_status_t http_get(const std::string &url, std::string *out)
         return MARS_ERR_IO;
     }
 
-    *out = buf.body;
+    *out = buf;
     return MARS_OK;
 }
 
@@ -154,6 +150,72 @@ static mars_status_t db_open(const char *path, sqlite3 **db_out)
 
     *db_out = db;
     return MARS_OK;
+}
+
+static mars_status_t eth_feature_needs_migration(sqlite3 *db, int *needs)
+{
+    sqlite3_stmt *stmt = NULL;
+    int rc;
+
+    if ((db == NULL) || (needs == NULL)) {
+        return MARS_ERR_ARG;
+    }
+
+    *needs = 0;
+    rc = sqlite3_prepare_v2(db, "PRAGMA table_info(eth_block_features)", -1, &stmt, NULL);
+    if (rc != SQLITE_OK) {
+        return MARS_ERR_IO;
+    }
+
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(stmt, 1);
+        const int not_null = sqlite3_column_int(stmt, 3);
+        if ((name != NULL) &&
+            ((strcmp((const char *)name, "eth_value_total") == 0) ||
+             (strcmp((const char *)name, "input_bytes_total") == 0)) &&
+            (not_null != 0)) {
+            *needs = 1;
+            break;
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    return ((rc == SQLITE_DONE) || (*needs != 0)) ? MARS_OK : MARS_ERR_IO;
+}
+
+static mars_status_t migrate_eth_feature_schema(sqlite3 *db)
+{
+    int needs = 0;
+    mars_status_t st;
+    static const char *sql =
+        "BEGIN IMMEDIATE;"
+        "CREATE TABLE eth_block_features_new("
+        " block_number INTEGER PRIMARY KEY,"
+        " ts INTEGER NOT NULL,"
+        " tx_count INTEGER NOT NULL,"
+        " gas_used INTEGER NOT NULL,"
+        " base_fee_gwei REAL,"
+        " eth_value_total REAL,"
+        " input_bytes_total INTEGER"
+        ");"
+        "INSERT INTO eth_block_features_new"
+        "(block_number,ts,tx_count,gas_used,base_fee_gwei,eth_value_total,input_bytes_total)"
+        " SELECT block_number,ts,tx_count,gas_used,base_fee_gwei,eth_value_total,input_bytes_total"
+        " FROM eth_block_features;"
+        "DROP TABLE eth_block_features;"
+        "ALTER TABLE eth_block_features_new RENAME TO eth_block_features;"
+        "COMMIT;";
+
+    st = eth_feature_needs_migration(db, &needs);
+    if ((st != MARS_OK) || (needs == 0)) {
+        return st;
+    }
+
+    st = sql_exec(db, sql);
+    if (st != MARS_OK) {
+        (void)sql_exec(db, "ROLLBACK");
+    }
+    return st;
 }
 
 static mars_status_t db_schema(sqlite3 *db)
@@ -211,8 +273,8 @@ static mars_status_t db_schema(sqlite3 *db)
         " tx_count INTEGER NOT NULL,"
         " gas_used INTEGER NOT NULL,"
         " base_fee_gwei REAL,"
-        " eth_value_total REAL NOT NULL,"
-        " input_bytes_total INTEGER NOT NULL"
+        " eth_value_total REAL,"
+        " input_bytes_total INTEGER"
         ");"
         "CREATE TABLE IF NOT EXISTS fred_series("
         " series_id TEXT PRIMARY KEY,"
@@ -229,7 +291,56 @@ static mars_status_t db_schema(sqlite3 *db)
         ");"
         "CREATE INDEX IF NOT EXISTS fred_obs_date_idx ON fred_observations(date);";
 
-    return sql_exec(db, sql);
+    mars_status_t st = sql_exec(db, sql);
+    if (st != MARS_OK) {
+        return st;
+    }
+    st = migrate_eth_feature_schema(db);
+    if (st != MARS_OK) {
+        return st;
+    }
+
+    static const char *view_sql =
+        "DROP VIEW IF EXISTS basefee_training_bars;"
+        "CREATE VIEW basefee_training_bars AS "
+        "SELECT e.ts AS ts,"
+        " (e.base_fee_gwei * 100.0) - "
+        "  (CASE WHEN (e.base_fee_gwei * 100.0) * 0.0005 > 0.000001 "
+        "   THEN (e.base_fee_gwei * 100.0) * 0.0005 ELSE 0.000001 END) AS bid,"
+        " (e.base_fee_gwei * 100.0) + "
+        "  (CASE WHEN (e.base_fee_gwei * 100.0) * 0.0005 > 0.000001 "
+        "   THEN (e.base_fee_gwei * 100.0) * 0.0005 ELSE 0.000001 END) AS ask,"
+        " CASE WHEN b.gas_limit > e.gas_used "
+        "  THEN (b.gas_limit - e.gas_used) / 1000000.0 ELSE 0.0 END AS bid_sz,"
+        " e.gas_used / 1000000.0 AS ask_sz,"
+        " e.tx_count AS volume,"
+        " (1.0 * e.gas_used) / b.gas_limit AS gas_util,"
+        " e.tx_count AS tx_count,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS2' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs2,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS10' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs10,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='T10Y2Y' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS t10y2y,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='VIXCLS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS vixcls,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DTWEXBGS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dtwexbgs,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='WALCL' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS walcl "
+        "FROM eth_block_features e "
+        "JOIN eth_blocks b ON b.number=e.block_number "
+        "WHERE e.base_fee_gwei IS NOT NULL "
+        "AND e.base_fee_gwei > 0.0 "
+        "AND b.gas_limit > 0;";
+
+    return sql_exec(db, view_sql);
 }
 
 static int hex_digit(char c)
@@ -432,6 +543,54 @@ static void collect_json_objects(const std::string &s, size_t lo, size_t hi,
     }
 }
 
+static size_t json_array_item_count(const std::string &s, size_t lo, size_t hi)
+{
+    size_t i;
+    size_t n = 0U;
+    int depth = 0;
+    int in_str = 0;
+    int seen = 0;
+
+    if (hi > s.size()) {
+        hi = s.size();
+    }
+
+    for (i = lo; i < hi; ++i) {
+        const char c = s[i];
+        if (in_str != 0) {
+            if ((c == '"') && (is_escaped_quote(s, i) == 0)) {
+                in_str = 0;
+            }
+            seen = 1;
+            continue;
+        }
+        if (c == '"') {
+            in_str = 1;
+            seen = 1;
+        } else if ((c == '{') || (c == '[')) {
+            ++depth;
+            seen = 1;
+        } else if ((c == '}') || (c == ']')) {
+            if (depth > 0) {
+                --depth;
+            }
+            seen = 1;
+        } else if ((c == ',') && (depth == 0)) {
+            if (seen != 0) {
+                ++n;
+                seen = 0;
+            }
+        } else if (isspace((unsigned char)c) == 0) {
+            seen = 1;
+        }
+    }
+
+    if (seen != 0) {
+        ++n;
+    }
+    return n;
+}
+
 static mars_status_t sqlite_step_done(sqlite3_stmt *stmt)
 {
     const int rc = sqlite3_step(stmt);
@@ -538,11 +697,76 @@ static mars_status_t eth_latest_block(const char *rpc_url, uint64_t *out)
     return MARS_OK;
 }
 
-static std::string block_param(uint64_t n)
+static std::string block_param(uint64_t n, uint32_t full_txs)
 {
     char buf[64];
     (void)snprintf(buf, sizeof(buf), "0x%llx", (unsigned long long)n);
-    return std::string("[\"") + buf + "\",true]";
+    return std::string("[\"") + buf + "\"," + ((full_txs != 0U) ? "true" : "false") + "]";
+}
+
+static std::string block_batch_payload(uint64_t from_block, uint64_t to_block,
+                                       uint32_t full_txs)
+{
+    std::string payload = "[";
+    uint64_t n;
+
+    for (n = from_block; n <= to_block; ++n) {
+        char id[64];
+
+        if (n != from_block) {
+            payload += ",";
+        }
+        (void)snprintf(id, sizeof(id), "%llu", (unsigned long long)n);
+        payload += "{\"jsonrpc\":\"2.0\",\"method\":\"eth_getBlockByNumber\",\"params\":";
+        payload += block_param(n, full_txs);
+        payload += ",\"id\":";
+        payload += id;
+        payload += "}";
+        if (n == UINT64_MAX) {
+            break;
+        }
+    }
+
+    payload += "]";
+    return payload;
+}
+
+static mars_status_t eth_rpc_blocks(const char *rpc_url, uint64_t from_block,
+                                    uint64_t to_block, uint32_t full_txs,
+                                    std::vector<std::string> *blocks)
+{
+    std::vector<std::pair<size_t, size_t> > objs;
+    std::string json;
+    mars_status_t st;
+    size_t i;
+    const uint64_t expected = to_block - from_block + 1U;
+
+    if ((rpc_url == NULL) || (blocks == NULL) || (from_block > to_block)) {
+        return MARS_ERR_ARG;
+    }
+
+    st = http_post_json(rpc_url, block_batch_payload(from_block, to_block, full_txs), &json);
+    if (st != MARS_OK) {
+        return st;
+    }
+
+    collect_json_objects(json, 0U, json.size(), &objs);
+    if (objs.size() != (size_t)expected) {
+        return MARS_ERR_PARSE;
+    }
+
+    blocks->clear();
+    blocks->reserve(objs.size());
+    for (i = 0U; i < objs.size(); ++i) {
+        const size_t lo = objs[i].first;
+        const size_t hi = objs[i].second;
+        if (json.find("\"result\"", lo) >= hi) {
+            return MARS_ERR_PARSE;
+        }
+        blocks->push_back(json.substr(lo, hi - lo));
+    }
+
+    return MARS_OK;
 }
 
 static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_stmt,
@@ -566,6 +790,7 @@ static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *fea
     double base_fee_gwei;
     double total_eth = 0.0;
     uint64_t total_input_bytes = 0U;
+    size_t tx_count;
     size_t i;
     mars_status_t st;
 
@@ -596,6 +821,7 @@ static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *fea
     base_fee_gwei = base_fee_hex.empty() ? 0.0 : (hex_to_double(base_fee_hex) / 1.0e9);
 
     collect_json_objects(json, tx_lo, tx_hi, &objs);
+    tx_count = (store_txs != 0U) ? objs.size() : json_array_item_count(json, tx_lo, tx_hi);
 
     if ((store_txs != 0U) && (tx_stmt == NULL)) {
         return MARS_ERR_ARG;
@@ -651,7 +877,7 @@ static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *fea
     (void)sqlite3_bind_int64(block_stmt, 6, (sqlite3_int64)gas_limit);
     bind_text_or_null(block_stmt, 7, base_fee_hex);
     (void)sqlite3_bind_double(block_stmt, 8, base_fee_gwei);
-    (void)sqlite3_bind_int64(block_stmt, 9, (sqlite3_int64)objs.size());
+    (void)sqlite3_bind_int64(block_stmt, 9, (sqlite3_int64)tx_count);
     st = sqlite_step_done(block_stmt);
     if (st != MARS_OK) {
         return st;
@@ -659,11 +885,16 @@ static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *fea
 
     (void)sqlite3_bind_int64(feat_stmt, 1, (sqlite3_int64)number);
     (void)sqlite3_bind_int64(feat_stmt, 2, (sqlite3_int64)ts);
-    (void)sqlite3_bind_int64(feat_stmt, 3, (sqlite3_int64)objs.size());
+    (void)sqlite3_bind_int64(feat_stmt, 3, (sqlite3_int64)tx_count);
     (void)sqlite3_bind_int64(feat_stmt, 4, (sqlite3_int64)gas_used);
     (void)sqlite3_bind_double(feat_stmt, 5, base_fee_gwei);
-    (void)sqlite3_bind_double(feat_stmt, 6, total_eth);
-    (void)sqlite3_bind_int64(feat_stmt, 7, (sqlite3_int64)total_input_bytes);
+    if (store_txs != 0U) {
+        (void)sqlite3_bind_double(feat_stmt, 6, total_eth);
+        (void)sqlite3_bind_int64(feat_stmt, 7, (sqlite3_int64)total_input_bytes);
+    } else {
+        (void)sqlite3_bind_null(feat_stmt, 6);
+        (void)sqlite3_bind_null(feat_stmt, 7);
+    }
     return sqlite_step_done(feat_stmt);
 }
 
@@ -823,6 +1054,94 @@ static mars_status_t export_query(sqlite3 *db, const char *sql, FILE *fp)
     return (rc == SQLITE_DONE) ? MARS_OK : MARS_ERR_IO;
 }
 
+static mars_status_t summary_i64(sqlite3 *db, const char *sql, sqlite3_int64 *out)
+{
+    sqlite3_stmt *stmt = NULL;
+
+    if ((db == NULL) || (sql == NULL) || (out == NULL)) {
+        return MARS_ERR_ARG;
+    }
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return MARS_ERR_IO;
+    }
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return MARS_ERR_IO;
+    }
+
+    *out = sqlite3_column_int64(stmt, 0);
+    sqlite3_finalize(stmt);
+    return MARS_OK;
+}
+
+static mars_status_t print_summary_row(sqlite3 *db, const char *label, const char *sql)
+{
+    sqlite3_stmt *stmt = NULL;
+    int cols;
+    int i;
+
+    if ((db == NULL) || (label == NULL) || (sql == NULL)) {
+        return MARS_ERR_ARG;
+    }
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        return MARS_ERR_IO;
+    }
+    if (sqlite3_step(stmt) != SQLITE_ROW) {
+        sqlite3_finalize(stmt);
+        return MARS_ERR_IO;
+    }
+
+    cols = sqlite3_column_count(stmt);
+    (void)printf("%s:", label);
+    for (i = 0; i < cols; ++i) {
+        const unsigned char *txt = sqlite3_column_text(stmt, i);
+        (void)printf(" %s=", sqlite3_column_name(stmt, i));
+        if (txt == NULL) {
+            (void)printf("NULL");
+        } else {
+            (void)printf("%s", (const char *)txt);
+        }
+    }
+    (void)printf("\n");
+
+    sqlite3_finalize(stmt);
+    return MARS_OK;
+}
+
+static mars_status_t print_fred_summary(sqlite3 *db)
+{
+    sqlite3_stmt *stmt = NULL;
+    int rc;
+
+    if (db == NULL) {
+        return MARS_ERR_ARG;
+    }
+    if (sqlite3_prepare_v2(db,
+        "SELECT series_id,count(*) AS rows,min(date) AS first_date,"
+        "max(date) AS last_date,"
+        "sum(CASE WHEN value_real IS NULL THEN 1 ELSE 0 END) AS null_values "
+        "FROM fred_observations GROUP BY series_id ORDER BY series_id",
+        -1, &stmt, NULL) != SQLITE_OK) {
+        return MARS_ERR_IO;
+    }
+
+    (void)printf("fred_series:\n");
+    while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
+        const unsigned char *series = sqlite3_column_text(stmt, 0);
+        const unsigned char *first_date = sqlite3_column_text(stmt, 2);
+        const unsigned char *last_date = sqlite3_column_text(stmt, 3);
+        (void)printf("  %s rows=%lld first_date=%s last_date=%s null_values=%lld\n",
+                     (series == NULL) ? "" : (const char *)series,
+                     (long long)sqlite3_column_int64(stmt, 1),
+                     (first_date == NULL) ? "NULL" : (const char *)first_date,
+                     (last_date == NULL) ? "NULL" : (const char *)last_date,
+                     (long long)sqlite3_column_int64(stmt, 4));
+    }
+
+    sqlite3_finalize(stmt);
+    return (rc == SQLITE_DONE) ? MARS_OK : MARS_ERR_IO;
+}
+
 } /* namespace */
 
 extern "C" mars_status_t mars_db_init(const char *db_path)
@@ -839,6 +1158,97 @@ extern "C" mars_status_t mars_db_init(const char *db_path)
     return st;
 }
 
+extern "C" mars_status_t mars_db_summary(const char *db_path)
+{
+    sqlite3 *db = NULL;
+    sqlite3_int64 market_rows = 0;
+    sqlite3_int64 basefee_rows = 0;
+    mars_status_t st;
+
+    st = db_open(db_path, &db);
+    if (st != MARS_OK) {
+        return st;
+    }
+    st = db_schema(db);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+
+    (void)printf("database: %s\n", db_path);
+
+    st = print_summary_row(db, "market_bars",
+        "SELECT count(*) AS rows FROM market_bars");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "eth_blocks",
+        "SELECT count(*) AS rows,min(number) AS first_block,max(number) AS last_block,"
+        "datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc FROM eth_blocks");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "eth_block_features",
+        "SELECT count(*) AS rows,count(eth_value_total) AS value_rows,"
+        "count(input_bytes_total) AS input_rows FROM eth_block_features");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "eth_txs",
+        "SELECT count(*) AS rows FROM eth_txs");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "basefee_training_bars",
+        "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc FROM basefee_training_bars");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "fred_observations",
+        "SELECT count(*) AS rows,min(date) AS first_date,max(date) AS last_date "
+        "FROM fred_observations");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_fred_summary(db);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+
+    st = summary_i64(db, "SELECT count(*) FROM market_bars", &market_rows);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = summary_i64(db, "SELECT count(*) FROM basefee_training_bars", &basefee_rows);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+
+    if (market_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
+        (void)printf("training_source: market_bars rows=%lld min_rows=%u\n",
+                     (long long)market_rows, MARS_MIN_TRAIN_ROWS);
+    } else if (basefee_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
+        (void)printf("training_source: basefee_training_bars rows=%lld min_rows=%u\n",
+                     (long long)basefee_rows, MARS_MIN_TRAIN_ROWS);
+    } else {
+        (void)printf("training_source: none rows=0 min_rows=%u\n", MARS_MIN_TRAIN_ROWS);
+    }
+
+    sqlite3_close(db);
+    return MARS_OK;
+}
+
 extern "C" mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,
                                         uint64_t from_block, uint64_t to_block,
                                         uint32_t store_txs)
@@ -849,6 +1259,8 @@ extern "C" mars_status_t mars_eth_update(const char *db_path, const char *rpc_ur
     sqlite3_stmt *tx_stmt = NULL;
     uint64_t n;
     uint64_t latest = 0U;
+    uint64_t done = 0U;
+    const uint64_t batch_size = (store_txs == 0U) ? 25U : 1U;
     mars_status_t st;
 
     if ((db_path == NULL) || (rpc_url == NULL)) {
@@ -931,30 +1343,58 @@ extern "C" mars_status_t mars_eth_update(const char *db_path, const char *rpc_ur
         return st;
     }
 
-    for (n = from_block; n <= to_block; ++n) {
-        std::string json;
-        st = eth_rpc(rpc_url, "eth_getBlockByNumber", block_param(n), &json);
+    for (n = from_block; n <= to_block;) {
+        const uint64_t remaining = to_block - n + 1U;
+        const uint64_t step = (remaining > batch_size) ? batch_size : remaining;
+        const uint64_t batch_to = n + step - 1U;
+
+        if (store_txs == 0U) {
+            std::vector<std::string> blocks;
+            size_t i;
+
+            st = eth_rpc_blocks(rpc_url, n, batch_to, store_txs, &blocks);
+            if (st != MARS_OK) {
+                break;
+            }
+            for (i = 0U; i < blocks.size(); ++i) {
+                st = store_eth_block(block_stmt, feat_stmt, tx_stmt, blocks[i], store_txs);
+                if (st != MARS_OK) {
+                    break;
+                }
+            }
+            if (st != MARS_OK) {
+                break;
+            }
+        } else {
+            std::string json;
+            st = eth_rpc(rpc_url, "eth_getBlockByNumber", block_param(n, store_txs), &json);
+            if (st != MARS_OK) {
+                break;
+            }
+            st = store_eth_block(block_stmt, feat_stmt, tx_stmt, json, store_txs);
+            if (st != MARS_OK) {
+                break;
+            }
+        }
+
+        st = set_state(db, "eth_last_block", batch_to);
         if (st != MARS_OK) {
             break;
         }
-        st = store_eth_block(block_stmt, feat_stmt, tx_stmt, json, store_txs);
-        if (st != MARS_OK) {
-            break;
-        }
-        st = set_state(db, "eth_last_block", n);
-        if (st != MARS_OK) {
-            break;
-        }
-        if (((n - from_block + 1U) % 100U) == 0U) {
+
+        done += step;
+        if ((done % 100U) == 0U) {
             st = sql_exec(db, "COMMIT; BEGIN IMMEDIATE");
             if (st != MARS_OK) {
                 break;
             }
-            (void)fprintf(stderr, "eth-update: stored block %llu\n", (unsigned long long)n);
+            (void)fprintf(stderr, "eth-update: stored block %llu\n", (unsigned long long)batch_to);
         }
-        if (n == UINT64_MAX) {
+
+        if (batch_to == UINT64_MAX) {
             break;
         }
+        n = batch_to + 1U;
     }
 
     if (st == MARS_OK) {

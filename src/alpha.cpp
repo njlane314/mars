@@ -49,7 +49,7 @@ static double soft_threshold(double x, double lambda)
     return 0.0;
 }
 
-uint32_t AlphaModel::augDim(uint32_t base_dim, uint32_t k)
+uint32_t alpha::aug_dim(uint32_t base_dim, uint32_t k)
 {
     return base_dim + k + (base_dim * k);
 }
@@ -67,7 +67,7 @@ static void build_aug_raw(
     uint32_t q;
     uint32_t p = 0U;
 
-    ScalerOps::applyVec(base_scaler, r->base, base);
+    scale::apply_vec(base_scaler, r->base, base);
 
     for (j = 0U; j < MARS_MAX_BASE_FEATURES; ++j) {
         aug[p] = base[j];
@@ -102,8 +102,8 @@ static mars_status_t fit_base_scaler(mars_model_t *m, const mars_data_t *d, size
         return MARS_ERR_MEM;
     }
 
-    ScalerOps::rowsToMatrixBase(d, start, end, raw);
-    st = ScalerOps::fit(&m->base_scaler, raw, n, MARS_MAX_BASE_FEATURES);
+    scale::rows_to_matrix_base(d, start, end, raw);
+    st = scale::fit(&m->base_scaler, raw, n, MARS_MAX_BASE_FEATURES);
     free(raw);
     return st;
 }
@@ -156,7 +156,7 @@ static double predict_row(const mars_model_t *m, const mars_row_t *r, const doub
     uint32_t j;
 
     build_aug_raw(r, &m->base_scaler, pi, m->k, aug_raw);
-    ScalerOps::applyVec(&m->aug_scaler, aug_raw, aug);
+    scale::apply_vec(&m->aug_scaler, aug_raw, aug);
 
     for (j = 0U; j < m->aug_dim; ++j) {
         y += m->beta[j] * aug[j];
@@ -243,7 +243,7 @@ static mars_status_t enet_fit(
 }
 
 
-mars_status_t AlphaModel::predictRange(
+mars_status_t alpha::predict_range(
     const mars_model_t *m,
     const mars_data_t *d,
     size_t start,
@@ -263,7 +263,7 @@ mars_status_t AlphaModel::predictRange(
         return MARS_ERR_MEM;
     }
 
-    st = HmmModel::filterRange(&m->hmm, d, start, end, pi);
+    st = hmm::filter_range(&m->hmm, d, start, end, pi);
     if (st != MARS_OK) {
         free(pi);
         return st;
@@ -282,7 +282,7 @@ mars_status_t AlphaModel::predictRange(
 }
 
 
-mars_status_t AlphaModel::trainEval(
+mars_status_t alpha::train_eval(
     mars_model_t *m,
     const mars_data_t *d,
     size_t train_start,
@@ -328,11 +328,11 @@ mars_status_t AlphaModel::trainEval(
         goto done;
     }
 
-    st = HmmModel::filterRange(&m->hmm, d, train_start, train_end, pi_train);
+    st = hmm::filter_range(&m->hmm, d, train_start, train_end, pi_train);
     if (st != MARS_OK) {
         goto done;
     }
-    st = HmmModel::filterRange(&m->hmm, d, val_start, val_end, pi_val);
+    st = hmm::filter_range(&m->hmm, d, val_start, val_end, pi_val);
     if (st != MARS_OK) {
         goto done;
     }
@@ -341,7 +341,7 @@ mars_status_t AlphaModel::trainEval(
     if (st != MARS_OK) {
         goto done;
     }
-    st = ScalerOps::fit(&m->aug_scaler, x_train, n_train, m->aug_dim);
+    st = scale::fit(&m->aug_scaler, x_train, n_train, m->aug_dim);
     if (st != MARS_OK) {
         goto done;
     }
@@ -371,7 +371,7 @@ mars_status_t AlphaModel::trainEval(
         pred[i] = yhat;
     }
 
-    *stats_out = Backtester::evaluate(m, d, val_start, val_end, pred, NULL);
+    *stats_out = backtest::evaluate(m, d, val_start, val_end, pred, NULL);
 
 done:
     free(pi_train);
@@ -384,7 +384,7 @@ done:
 }
 
 
-mars_status_t AlphaModel::trainFinal(
+mars_status_t alpha::train_final(
     mars_model_t *m,
     const mars_data_t *d,
     size_t train_start,
@@ -392,5 +392,5 @@ mars_status_t AlphaModel::trainFinal(
     double lambda)
 {
     mars_bt_stats_t dummy;
-    return AlphaModel::trainEval(m, d, train_start, train_end, train_start, train_end, lambda, &dummy);
+    return alpha::train_eval(m, d, train_start, train_end, train_start, train_end, lambda, &dummy);
 }

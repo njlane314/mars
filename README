@@ -12,6 +12,7 @@ SYNOPSIS
      mars replay-db market.db model.mars trades.csv [table]
 
      mars db-init market.db
+     mars db-summary market.db
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
      mars eth-export market.db ethblocks.csv
      mars fred-update market.db SERIES[,SERIES...]
@@ -35,28 +36,28 @@ FILES
           C++ orchestration over focused module classes.
 
      src/data.cpp, src/data.hpp
-          Data: load market bars directly from SQLite.
+          data: load market bars directly from SQLite.
 
      src/features.cpp, src/features.hpp
-          FeatureBuilder: construct model features from market rows.
+          features: construct model features from market rows.
 
      src/scale.cpp, src/scale.hpp
-          ScalerOps: fit/apply scalers and build feature matrices.
+          scale: fit/apply scalers and build feature matrices.
 
      src/hmm.cpp, src/hmm.hpp
-          HmmModel: fit and filter latent states.
+          hmm: fit and filter latent states.
 
      src/alpha.cpp, src/alpha.hpp
-          AlphaModel: train and apply the sparse alpha model.
+          alpha: train and apply the sparse alpha model.
 
      src/backtest.cpp, src/backtest.hpp
-          Backtester: replay predictions into PnL and trade output.
+          backtest: replay predictions into PnL and trade output.
 
      src/store.cpp, src/store.hpp
-          ModelStore: default config, validation, save, and load.
+          store: default config, validation, save, and load.
 
      src/report.cpp, src/report.hpp
-          Reporter: stats and model inspection output.
+          report: stats and model inspection output.
 
      src/db.cpp
           SQLite-backed Ethereum and FRED ingestion/export commands.
@@ -67,7 +68,9 @@ FILES
 
 INPUT
      DB commands write local SQLite data. Training reads market bars directly
-     from SQLite through fit-db and replay-db.
+     from SQLite through fit-db and replay-db. If the default market_bars table
+     is empty, fit-db and replay-db derive a trainable Ethereum base-fee series
+     from eth_block_features and add as-of FRED observations as model features.
 
 COMMANDS
      make
@@ -84,16 +87,21 @@ COMMANDS
           Inspect learned latent states and sparse alpha coefficients.
 
      mars fit-db market.db es.mars
-          Fit a model directly from market_bars.
+          Fit a model from market_bars, or from derived Ethereum/FRED data when
+          market_bars is empty.
 
      mars fit-db market.db es.mars my_bars
           Fit directly from another table or view with the market-bar schema.
 
      mars replay-db market.db es.mars trades.csv
-          Replay a fitted model directly from market_bars.
+          Replay a fitted model from the same default DB source.
 
      mars db-init market.db
           Initialize the local SQLite learning database.
+
+     mars db-summary market.db
+          Print table counts, Ethereum/FRED date coverage, and the source that
+          fit-db will train from by default.
 
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
           Fetch Ethereum block and optional transaction data using ETH_RPC_URL.
@@ -128,11 +136,24 @@ DATABASE
 
                mars fit-db market.db es.mars my_market_view
 
+     Ethereum/FRED base-fee bars
+          When market_bars has fewer than the minimum training rows and no
+          explicit table is supplied, mars reads the basefee_training_bars view.
+          This trains a base-fee movement model, not an ETH spot-price model.
+
+          The view derives bid/ask-shaped rows from real eth_block_features:
+          base_fee_gwei is scaled by 100 so sub-gwei moves fit the default tick
+          model. Block gas utilization, transaction count, and the latest
+          available DGS2, DGS10, T10Y2Y, VIXCLS, DTWEXBGS, and WALCL
+          observations are added as auxiliary features.
+
      Ethereum chain data
           mars talks to an Ethereum execution JSON-RPC endpoint and calls
-          eth_getBlockByNumber with full transaction objects. Run your own node
-          if possible; hosted RPC endpoints work for small backfills but are
-          usually rate-limited for large historical ingestion.
+          eth_getBlockByNumber. The default stores full transaction objects;
+          --blocks-only stores real block headers and transaction counts without
+          transaction-body aggregates. Run your own node if possible; hosted RPC
+          endpoints work for small backfills but are usually rate-limited for
+          large historical ingestion.
 
                export ETH_RPC_URL=http://127.0.0.1:8545
                mars eth-update market.db 19000000 19001000
@@ -143,6 +164,11 @@ DATABASE
                eth_blocks
                eth_txs
                eth_block_features
+               basefee_training_bars
+
+          Block header fields are stored from JSON-RPC observations.
+          Transaction-body aggregates in eth_block_features are NULL unless
+          full transaction bodies have been ingested.
 
      FRED data
           FRED observations are fetched with FRED_API_KEY:

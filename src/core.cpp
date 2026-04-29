@@ -19,41 +19,41 @@
 
 namespace {
 
-class MarsEngine final {
+class core final {
 public:
-    MarsEngine() = delete;
+    core() = delete;
 
-    static mars_status_t fitDb(const char *db_path, const char *table, const char *model_path)
+    static mars_status_t fit_db(const char *db_path, const char *table, const char *model_path)
     {
         mars_data_t d;
         mars_status_t st;
 
         memset(&d, 0, sizeof(d));
-        st = Data::loadBars(db_path, table, &d);
+        st = data::load_bars(db_path, table, &d);
         if (st == MARS_OK) {
-            st = fitLoaded(&d, model_path);
+            st = fit_loaded(&d, model_path);
         }
-        Data::release(&d);
+        data::release(&d);
         return st;
     }
 
-    static mars_status_t replayDb(const char *db_path, const char *table,
+    static mars_status_t replay_db(const char *db_path, const char *table,
                                 const char *model_path, const char *trades_path)
     {
         mars_data_t d;
         mars_status_t st;
 
         memset(&d, 0, sizeof(d));
-        st = Data::loadBars(db_path, table, &d);
+        st = data::load_bars(db_path, table, &d);
         if (st == MARS_OK) {
-            st = replayLoaded(&d, model_path, trades_path);
+            st = replay_loaded(&d, model_path, trades_path);
         }
-        Data::release(&d);
+        data::release(&d);
         return st;
     }
 
 private:
-    static mars_status_t fitLoaded(mars_data_t *d, const char *model_path)
+    static mars_status_t fit_loaded(mars_data_t *d, const char *model_path)
     {
         mars_config_t cfg;
         mars_model_t final_model;
@@ -80,9 +80,9 @@ private:
 
         memset(&final_model, 0, sizeof(final_model));
         memset(&best_stats, 0, sizeof(best_stats));
-        cfg = ModelStore::defaultConfig();
+        cfg = store::default_config();
 
-        st = FeatureBuilder::make(d, &cfg);
+        st = features::make(d, &cfg);
         if (st != MARS_OK) {
             return st;
         }
@@ -105,31 +105,31 @@ private:
             double hmm_ll;
             uint32_t li;
 
-            st = ModelStore::initFromConfig(&m, &cfg, k);
+            st = store::init_from_config(&m, &cfg, k);
             if (st != MARS_OK) {
                 return st;
             }
 
-            st = HmmModel::fitPreserveScaler(&m.hmm, d, warm, split1, k);
+            st = hmm::fit_preserve_scaler(&m.hmm, d, warm, split1, k);
             if (st != MARS_OK) {
                 continue;
             }
-            hmm_ll = HmmModel::logLikRange(&m.hmm, d, split1, split2);
+            hmm_ll = hmm::log_lik_range(&m.hmm, d, split1, split2);
 
             for (li = 0U; li < MARS_MAX_LAMBDAS; ++li) {
                 mars_model_t mt = m;
                 mars_bt_stats_t stv;
                 double score;
 
-                st = AlphaModel::trainEval(&mt, d, warm, split1, split1, split2, lambdas[li], &stv);
+                st = alpha::train_eval(&mt, d, warm, split1, split1, split2, lambdas[li], &stv);
                 if (st != MARS_OK) {
                     continue;
                 }
 
-                score = ModelStore::selectScore(&stv);
+                score = store::select_score(&stv);
                 (void)printf("candidate K=%u lambda=%.6g hmm_val_ll=%.8f score=%.8f ",
                              k, lambdas[li], hmm_ll, score);
-                Reporter::printStats("val", &stv);
+                report::print_stats("val", &stv);
 
                 if (score > best_score) {
                     best_score = score;
@@ -145,19 +145,19 @@ private:
         }
 
         (void)printf("selected K=%u lambda=%.6g score=%.8f\n", best_k, best_lambda, best_score);
-        Reporter::printStats("selected_validation", &best_stats);
+        report::print_stats("selected_validation", &best_stats);
 
-        st = ModelStore::initFromConfig(&final_model, &cfg, best_k);
+        st = store::init_from_config(&final_model, &cfg, best_k);
         if (st != MARS_OK) {
             return st;
         }
 
-        st = HmmModel::fitPreserveScaler(&final_model.hmm, d, warm, final_train_end, best_k);
+        st = hmm::fit_preserve_scaler(&final_model.hmm, d, warm, final_train_end, best_k);
         if (st != MARS_OK) {
             return st;
         }
 
-        st = AlphaModel::trainFinal(&final_model, d, warm, final_train_end, best_lambda);
+        st = alpha::train_final(&final_model, d, warm, final_train_end, best_lambda);
         if (st != MARS_OK) {
             return st;
         }
@@ -173,10 +173,10 @@ private:
             if (pred == NULL) {
                 return MARS_ERR_MEM;
             }
-            st = AlphaModel::predictRange(&final_model, d, final_train_end, end_usable, pred);
+            st = alpha::predict_range(&final_model, d, final_train_end, end_usable, pred);
             if (st == MARS_OK) {
-                mars_bt_stats_t tst = Backtester::evaluate(&final_model, d, final_train_end, end_usable, pred, NULL);
-                Reporter::printStats("holdout", &tst);
+                mars_bt_stats_t tst = backtest::evaluate(&final_model, d, final_train_end, end_usable, pred, NULL);
+                report::print_stats("holdout", &tst);
             }
             free(pred);
             if (st != MARS_OK) {
@@ -184,11 +184,11 @@ private:
             }
         }
 
-        st = ModelStore::save(model_path, &final_model);
+        st = store::save(model_path, &final_model);
         return st;
     }
 
-    static mars_status_t replayLoaded(mars_data_t *d, const char *model_path, const char *trades_path)
+    static mars_status_t replay_loaded(mars_data_t *d, const char *model_path, const char *trades_path)
     {
         mars_model_t m;
         mars_config_t cfg;
@@ -204,12 +204,12 @@ private:
 
         memset(&m, 0, sizeof(m));
 
-        st = ModelStore::load(model_path, &m);
+        st = store::load(model_path, &m);
         if (st != MARS_OK) {
             return st;
         }
 
-        cfg = ModelStore::defaultConfig();
+        cfg = store::default_config();
         cfg.horizon = m.horizon;
         cfg.tick_size = m.tick_size;
         cfg.turn_cost_ticks = m.turn_cost_ticks;
@@ -218,7 +218,7 @@ private:
         cfg.max_spread_ticks = m.max_spread_ticks;
         cfg.pos_max = m.pos_max;
 
-        st = FeatureBuilder::make(d, &cfg);
+        st = features::make(d, &cfg);
         if (st != MARS_OK) {
             return st;
         }
@@ -234,14 +234,14 @@ private:
             return MARS_ERR_MEM;
         }
 
-        st = AlphaModel::predictRange(&m, d, warm, end_usable, pred);
+        st = alpha::predict_range(&m, d, warm, end_usable, pred);
         if (st != MARS_OK) {
             free(pred);
             return st;
         }
 
-        stats = Backtester::evaluate(&m, d, warm, end_usable, pred, trades_path);
-        Reporter::printStats("replay", &stats);
+        stats = backtest::evaluate(&m, d, warm, end_usable, pred, trades_path);
+        report::print_stats("replay", &stats);
 
         free(pred);
         return MARS_OK;
@@ -252,16 +252,16 @@ private:
 
 mars_status_t mars_fit_db(const char *db_path, const char *table, const char *model_path)
 {
-    return MarsEngine::fitDb(db_path, table, model_path);
+    return core::fit_db(db_path, table, model_path);
 }
 
 mars_status_t mars_replay_db(const char *db_path, const char *table,
                            const char *model_path, const char *trades_path)
 {
-    return MarsEngine::replayDb(db_path, table, model_path, trades_path);
+    return core::replay_db(db_path, table, model_path, trades_path);
 }
 
 mars_status_t mars_inspect(const char *model_path)
 {
-    return Reporter::inspectModel(model_path);
+    return report::inspect_model(model_path);
 }

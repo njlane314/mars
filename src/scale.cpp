@@ -21,7 +21,7 @@ static double clip(double x, double lo, double hi)
 }
 
 
-mars_status_t ScalerOps::fit(mars_scaler_t *s, const double *x, size_t n, uint32_t d)
+mars_status_t scale::fit(mars_scaler_t *s, const double *x, size_t n, uint32_t d)
 {
     size_t i;
     uint32_t j;
@@ -57,7 +57,7 @@ mars_status_t ScalerOps::fit(mars_scaler_t *s, const double *x, size_t n, uint32
 }
 
 
-void ScalerOps::applyVec(const mars_scaler_t *s, const double *x, double *z)
+void scale::apply_vec(const mars_scaler_t *s, const double *x, double *z)
 {
     uint32_t j;
 
@@ -68,7 +68,7 @@ void ScalerOps::applyVec(const mars_scaler_t *s, const double *x, double *z)
 }
 
 
-void ScalerOps::rowsToMatrixReg(const mars_data_t *d, size_t start, size_t end, double *x)
+void scale::rows_to_matrix_reg(const mars_data_t *d, size_t start, size_t end, double *x)
 {
     size_t i;
     uint32_t j;
@@ -81,7 +81,7 @@ void ScalerOps::rowsToMatrixReg(const mars_data_t *d, size_t start, size_t end, 
 }
 
 
-void ScalerOps::rowsToMatrixBase(const mars_data_t *d, size_t start, size_t end, double *x)
+void scale::rows_to_matrix_base(const mars_data_t *d, size_t start, size_t end, double *x)
 {
     size_t i;
     uint32_t j;

@@ -4,14 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MARS_VERSION              1U
+#define MARS_VERSION              2U
 #define MARS_MAGIC                0x4d415253U  /* "MARS" */
 
 #define MARS_MAX_LINE             512U
 #define MARS_MAX_STATES           5U
 #define MARS_MAX_REG_FEATURES     8U
-#define MARS_MAX_BASE_FEATURES    16U
-#define MARS_MAX_AUG_FEATURES     128U
+#define MARS_MAX_AUX_FEATURES     8U
+#define MARS_MAX_BASE_FEATURES    24U
+#define MARS_MAX_AUG_FEATURES     192U
 #define MARS_MAX_CD_ITERS         250U
 #define MARS_MAX_EM_ITERS         80U
 #define MARS_MAX_LAMBDAS          9U
@@ -61,6 +62,7 @@ typedef struct
     double ret1_ticks;
     double label_ticks;
 
+    double aux[MARS_MAX_AUX_FEATURES];
     double reg[MARS_MAX_REG_FEATURES];
     double base[MARS_MAX_BASE_FEATURES];
 } mars_row_t;
@@ -146,6 +148,7 @@ mars_status_t mars_replay_db(const char *db_path, const char *table,
                            const char *model_path, const char *trades_path);
 mars_status_t mars_inspect(const char *model_path);
 mars_status_t mars_db_init(const char *db_path);
+mars_status_t mars_db_summary(const char *db_path);
 mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,
                             uint64_t from_block, uint64_t to_block,
                             uint32_t store_txs);

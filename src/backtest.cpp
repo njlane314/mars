@@ -40,7 +40,7 @@ static double prediction_to_pos(const mars_model_t *m, const mars_row_t *r, doub
 }
 
 
-mars_bt_stats_t Backtester::evaluate(
+mars_bt_stats_t backtest::evaluate(
     const mars_model_t *m,
     const mars_data_t *d,
     size_t start,

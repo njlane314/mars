@@ -18,6 +18,7 @@ static const char *default_table(const char *table)
     return table;
 }
 
+
 static int valid_ident(const char *s)
 {
     const unsigned char first = (s == NULL) ? 0U : (unsigned char)s[0];
@@ -39,10 +40,12 @@ static int valid_ident(const char *s)
     return 1;
 }
 
+
 static std::string quote_ident(const char *s)
 {
     return std::string("\"") + s + "\"";
 }
+
 
 static mars_status_t open_db(const char *path, int flags, sqlite3 **db_out)
 {
@@ -65,6 +68,7 @@ static mars_status_t open_db(const char *path, int flags, sqlite3 **db_out)
     return MARS_OK;
 }
 
+
 static int row_valid(const mars_row_t *r)
 {
     if (r == NULL) {
@@ -82,13 +86,13 @@ static int row_valid(const mars_row_t *r)
     return 1;
 }
 
-static mars_status_t count_rows(sqlite3 *db, const char *table, size_t *n_out)
+
+static mars_status_t count_sql(sqlite3 *db, const std::string &sql, size_t *n_out)
 {
     sqlite3_stmt *stmt = NULL;
     sqlite3_int64 n;
-    const std::string sql = "SELECT count(*) FROM " + quote_ident(table);
 
-    if ((db == NULL) || (table == NULL) || (n_out == NULL)) {
+    if ((db == NULL) || (n_out == NULL)) {
         return MARS_ERR_ARG;
     }
 
@@ -110,81 +114,75 @@ static mars_status_t count_rows(sqlite3 *db, const char *table, size_t *n_out)
     return MARS_OK;
 }
 
-} /* namespace */
 
-mars_status_t Data::loadBars(const char *db_path, const char *table_arg, mars_data_t *d)
+static mars_status_t count_rows(sqlite3 *db, const char *table, size_t *n_out)
 {
-    const char *table = default_table(table_arg);
-    sqlite3 *db = NULL;
+    if (table == NULL) {
+        return MARS_ERR_ARG;
+    }
+    return count_sql(db, "SELECT count(*) FROM " + quote_ident(table), n_out);
+}
+
+
+static std::string basefee_count_sql(void)
+{
+    return "SELECT count(*) FROM basefee_training_bars";
+}
+
+
+static std::string basefee_training_sql(void)
+{
+    return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
+           "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
+           "FROM basefee_training_bars ORDER BY ts";
+}
+
+
+static mars_status_t load_query(sqlite3 *db, const std::string &sql, size_t cap, mars_data_t *d)
+{
     sqlite3_stmt *stmt = NULL;
-    size_t cap;
     size_t n = 0U;
-    mars_status_t st;
     int rc;
 
-    if ((db_path == NULL) || (d == NULL) || (valid_ident(table) == 0)) {
+    if ((db == NULL) || (d == NULL) || (cap < MARS_MIN_TRAIN_ROWS)) {
         return MARS_ERR_ARG;
     }
 
     d->row = NULL;
     d->n = 0U;
 
-    st = open_db(db_path, SQLITE_OPEN_READONLY, &db);
-    if (st != MARS_OK) {
-        return st;
-    }
-
-    st = count_rows(db, table, &cap);
-    if (st != MARS_OK) {
-        sqlite3_close(db);
-        return st;
-    }
-    if (cap < MARS_MIN_TRAIN_ROWS) {
-        sqlite3_close(db);
-        return MARS_ERR_STATE;
-    }
-
     d->row = (mars_row_t *)calloc(cap, sizeof(mars_row_t));
     if (d->row == NULL) {
-        sqlite3_close(db);
         return MARS_ERR_MEM;
     }
 
-    {
-        const std::string sql =
-            "SELECT ts,bid,ask,bid_sz,ask_sz,volume FROM " +
-            quote_ident(table) + " ORDER BY ts";
-        if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) != SQLITE_OK) {
-            release(d);
-            sqlite3_close(db);
-            return MARS_ERR_IO;
-        }
+    if (sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, NULL) != SQLITE_OK) {
+        data::release(d);
+        return MARS_ERR_IO;
     }
 
     while ((rc = sqlite3_step(stmt)) == SQLITE_ROW) {
         mars_row_t *r;
         sqlite3_int64 ts;
         int col;
+        int aux;
 
         if (n >= cap) {
             sqlite3_finalize(stmt);
-            release(d);
-            sqlite3_close(db);
+            data::release(d);
             return MARS_ERR_STATE;
         }
 
         ts = sqlite3_column_int64(stmt, 0);
         if (ts < 0) {
             sqlite3_finalize(stmt);
-            release(d);
-            sqlite3_close(db);
+            data::release(d);
             return MARS_ERR_PARSE;
         }
         for (col = 1; col <= 5; ++col) {
             if (sqlite3_column_type(stmt, col) == SQLITE_NULL) {
                 sqlite3_finalize(stmt);
-                release(d);
-                sqlite3_close(db);
+                data::release(d);
                 return MARS_ERR_PARSE;
             }
         }
@@ -196,24 +194,30 @@ mars_status_t Data::loadBars(const char *db_path, const char *table_arg, mars_da
         r->bid_sz = sqlite3_column_double(stmt, 3);
         r->ask_sz = sqlite3_column_double(stmt, 4);
         r->volume = sqlite3_column_double(stmt, 5);
+        for (aux = 0; aux < (int)MARS_MAX_AUX_FEATURES; ++aux) {
+            const int src_col = 6 + aux;
+            r->aux[aux] = (sqlite3_column_count(stmt) > src_col) ?
+                sqlite3_column_double(stmt, src_col) : 0.0;
+            if (isfinite(r->aux[aux]) == 0) {
+                r->aux[aux] = 0.0;
+            }
+        }
         if (row_valid(r) == 0) {
             sqlite3_finalize(stmt);
-            release(d);
-            sqlite3_close(db);
+            data::release(d);
             return MARS_ERR_PARSE;
         }
         ++n;
     }
 
     sqlite3_finalize(stmt);
-    sqlite3_close(db);
 
     if (rc != SQLITE_DONE) {
-        release(d);
+        data::release(d);
         return MARS_ERR_IO;
     }
     if (n < MARS_MIN_TRAIN_ROWS) {
-        release(d);
+        data::release(d);
         return MARS_ERR_STATE;
     }
 
@@ -221,7 +225,57 @@ mars_status_t Data::loadBars(const char *db_path, const char *table_arg, mars_da
     return MARS_OK;
 }
 
-void Data::release(mars_data_t *d)
+} /* namespace */
+
+mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_data_t *d)
+{
+    const char *table = default_table(table_arg);
+    sqlite3 *db = NULL;
+    size_t cap = 0U;
+    mars_status_t st;
+    std::string sql;
+
+    if ((db_path == NULL) || (d == NULL) || (valid_ident(table) == 0)) {
+        return MARS_ERR_ARG;
+    }
+
+    st = open_db(db_path, SQLITE_OPEN_READONLY, &db);
+    if (st != MARS_OK) {
+        return st;
+    }
+
+    st = count_rows(db, table, &cap);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+
+    if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL)) {
+        st = count_sql(db, basefee_count_sql(), &cap);
+        if (st != MARS_OK) {
+            sqlite3_close(db);
+            return st;
+        }
+        if (cap >= MARS_MIN_TRAIN_ROWS) {
+            sql = basefee_training_sql();
+        }
+    }
+
+    if (sql.empty()) {
+        if (cap < MARS_MIN_TRAIN_ROWS) {
+            sqlite3_close(db);
+            return MARS_ERR_STATE;
+        }
+        sql = "SELECT ts,bid,ask,bid_sz,ask_sz,volume FROM " +
+              quote_ident(table) + " ORDER BY ts";
+    }
+
+    st = load_query(db, sql, cap, d);
+    sqlite3_close(db);
+    return st;
+}
+
+void data::release(mars_data_t *d)
 {
     if (d != NULL) {
         free(d->row);

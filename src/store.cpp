@@ -13,7 +13,7 @@ static uint32_t model_aug_dim(uint32_t base_dim, uint32_t k)
 
 }
 
-mars_status_t ModelStore::save(const char *path, const mars_model_t *m)
+mars_status_t store::save(const char *path, const mars_model_t *m)
 {
     FILE *fp;
 
@@ -38,7 +38,7 @@ mars_status_t ModelStore::save(const char *path, const mars_model_t *m)
     return MARS_OK;
 }
 
-mars_status_t ModelStore::load(const char *path, mars_model_t *m)
+mars_status_t store::load(const char *path, mars_model_t *m)
 {
     FILE *fp;
 
@@ -71,7 +71,7 @@ mars_status_t ModelStore::load(const char *path, mars_model_t *m)
 }
 
 
-double ModelStore::selectScore(const mars_bt_stats_t *s)
+double store::select_score(const mars_bt_stats_t *s)
 {
     if ((s == NULL) || (s->trades < 5.0)) {
         return -DBL_MAX / 4.0;
@@ -80,7 +80,7 @@ double ModelStore::selectScore(const mars_bt_stats_t *s)
 }
 
 
-mars_config_t ModelStore::defaultConfig(void)
+mars_config_t store::default_config(void)
 {
     mars_config_t c;
     c.horizon = MARS_DEFAULT_HORIZON;
@@ -94,7 +94,7 @@ mars_config_t ModelStore::defaultConfig(void)
 }
 
 
-mars_status_t ModelStore::initFromConfig(mars_model_t *m, const mars_config_t *cfg, uint32_t k)
+mars_status_t store::init_from_config(mars_model_t *m, const mars_config_t *cfg, uint32_t k)
 {
     if ((m == NULL) || (cfg == NULL) || (k == 0U) || (k > MARS_MAX_STATES)) {
         return MARS_ERR_ARG;

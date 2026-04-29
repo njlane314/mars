@@ -440,7 +440,7 @@ done:
 }
 
 
-mars_status_t HmmModel::fitPreserveScaler(mars_hmm_t *h, const mars_data_t *d, size_t start, size_t end, uint32_t k)
+mars_status_t hmm::fit_preserve_scaler(mars_hmm_t *h, const mars_data_t *d, size_t start, size_t end, uint32_t k)
 {
     double *raw = NULL;
     double *z = NULL;
@@ -461,14 +461,14 @@ mars_status_t HmmModel::fitPreserveScaler(mars_hmm_t *h, const mars_data_t *d, s
         goto done;
     }
 
-    ScalerOps::rowsToMatrixReg(d, start, end, raw);
-    st = ScalerOps::fit(&scaler, raw, n, MARS_MAX_REG_FEATURES);
+    scale::rows_to_matrix_reg(d, start, end, raw);
+    st = scale::fit(&scaler, raw, n, MARS_MAX_REG_FEATURES);
     if (st != MARS_OK) {
         goto done;
     }
 
     for (i = 0U; i < n; ++i) {
-        ScalerOps::applyVec(&scaler, &raw[i * MARS_MAX_REG_FEATURES], &z[i * MARS_MAX_REG_FEATURES]);
+        scale::apply_vec(&scaler, &raw[i * MARS_MAX_REG_FEATURES], &z[i * MARS_MAX_REG_FEATURES]);
     }
 
     st = hmm_fit_on_scaled(h, z, n, k, MARS_MAX_REG_FEATURES);
@@ -500,7 +500,7 @@ static mars_status_t hmm_filter_one(
         return MARS_ERR_ARG;
     }
 
-    ScalerOps::applyVec(&h->scaler, reg_raw, x);
+    scale::apply_vec(&h->scaler, reg_raw, x);
 
     for (j = 0U; j < h->k; ++j) {
         double s = MARS_LOG_ZERO;
@@ -523,7 +523,7 @@ static mars_status_t hmm_filter_one(
 }
 
 
-mars_status_t HmmModel::filterRange(
+mars_status_t hmm::filter_range(
     const mars_hmm_t *h,
     const mars_data_t *d,
     size_t start,
@@ -559,7 +559,7 @@ mars_status_t HmmModel::filterRange(
 }
 
 
-double HmmModel::logLikRange(const mars_hmm_t *h, const mars_data_t *d, size_t start, size_t end)
+double hmm::log_lik_range(const mars_hmm_t *h, const mars_data_t *d, size_t start, size_t end)
 {
     size_t t;
     uint32_t i;
@@ -581,7 +581,7 @@ double HmmModel::logLikRange(const mars_hmm_t *h, const mars_data_t *d, size_t s
         double logp[MARS_MAX_STATES];
         double norm;
 
-        ScalerOps::applyVec(&h->scaler, d->row[t].reg, x);
+        scale::apply_vec(&h->scaler, d->row[t].reg, x);
         for (j = 0U; j < h->k; ++j) {
             double s = MARS_LOG_ZERO;
             for (i = 0U; i < h->k; ++i) {

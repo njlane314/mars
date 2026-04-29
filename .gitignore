@@ -1,6 +1,5 @@
 mars
 build/
-exports/
 node/data/
 .secrets/
 .env
