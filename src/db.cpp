@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "api.h"
+#include "dex.hpp"
 
 namespace {
 
@@ -316,19 +317,35 @@ static mars_status_t db_schema(sqlite3 *db)
         " e.tx_count AS volume,"
         " (1.0 * e.gas_used) / b.gas_limit AS gas_util,"
         " e.tx_count AS tx_count,"
-        " e.gas_used / 1000000.0 AS gas_used_m,"
-        " b.gas_limit / 1000000.0 AS gas_limit_m,"
-        " e.base_fee_gwei AS base_fee_gwei,"
-        " coalesce(e.eth_value_total,0.0) AS eth_value_total,"
-        " coalesce(e.input_bytes_total,0.0) AS input_bytes_total,"
-        " 0.0 AS reserved "
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS2' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs2,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS10' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs10,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='T10Y2Y' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS t10y2y,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='VIXCLS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS vixcls,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DTWEXBGS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dtwexbgs,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='WALCL' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(e.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS walcl "
         "FROM eth_block_features e "
         "JOIN eth_blocks b ON b.number=e.block_number "
         "WHERE e.base_fee_gwei IS NOT NULL "
         "AND e.base_fee_gwei > 0.0 "
         "AND b.gas_limit > 0;";
 
-    return sql_exec(db, view_sql);
+    st = sql_exec(db, view_sql);
+    if (st != MARS_OK) {
+        return st;
+    }
+    return dex::schema(db);
 }
 
 static int hex_digit(char c)
@@ -1150,6 +1167,7 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
 {
     sqlite3 *db = NULL;
     sqlite3_int64 market_rows = 0;
+    sqlite3_int64 dex_rows = 0;
     sqlite3_int64 basefee_rows = 0;
     mars_status_t st;
 
@@ -1192,6 +1210,21 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
         sqlite3_close(db);
         return st;
     }
+    st = print_summary_row(db, "dex_swaps",
+        "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc,"
+        "min(price) AS min_price,max(price) AS max_price FROM dex_swaps");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "dex_training_bars",
+        "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc FROM dex_training_bars");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
     st = print_summary_row(db, "basefee_training_bars",
         "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
         "datetime(max(ts),'unixepoch') AS last_utc FROM basefee_training_bars");
@@ -1217,6 +1250,11 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
         sqlite3_close(db);
         return st;
     }
+    st = summary_i64(db, "SELECT count(*) FROM dex_training_bars", &dex_rows);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
     st = summary_i64(db, "SELECT count(*) FROM basefee_training_bars", &basefee_rows);
     if (st != MARS_OK) {
         sqlite3_close(db);
@@ -1226,6 +1264,9 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
     if (market_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
         (void)printf("training_source: market_bars rows=%lld min_rows=%u\n",
                      (long long)market_rows, MARS_MIN_TRAIN_ROWS);
+    } else if (dex_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
+        (void)printf("training_source: dex_training_bars rows=%lld min_rows=%u\n",
+                     (long long)dex_rows, MARS_MIN_TRAIN_ROWS);
     } else if (basefee_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
         (void)printf("training_source: basefee_training_bars rows=%lld min_rows=%u\n",
                      (long long)basefee_rows, MARS_MIN_TRAIN_ROWS);

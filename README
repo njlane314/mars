@@ -15,6 +15,8 @@ SYNOPSIS
      mars db-summary market.db
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
      mars eth-export market.db ethblocks.csv
+     mars dex-update market.db FROM_BLOCK TO_BLOCK [POOL]
+     mars dex-export market.db dexswaps.csv [POOL]
      mars fred-update market.db SERIES[,SERIES...]
      mars fred-export market.db fred.csv
 
@@ -60,7 +62,11 @@ FILES
           report: stats and model inspection output.
 
      src/db.cpp
-          SQLite-backed Ethereum and FRED ingestion/export commands.
+          SQLite schema, Ethereum block ingestion, FRED ingestion, and summary
+          commands.
+
+     src/dex.cpp, src/dex.hpp
+          dex: on-chain Uniswap V3 WETH/USDC swap ingestion and training view.
 
      Makefile
           Builds and installs mars. DB ingestion links against libcurl and
@@ -69,10 +75,10 @@ FILES
 INPUT
      DB commands write local SQLite data. Training reads market bars directly
      from SQLite through fit-db and replay-db. If the default market_bars table
-     is empty, fit-db and replay-db derive a trainable Ethereum base-fee series
-     from eth_block_features and Ethereum block fields.
-     mars does not fetch centralized-exchange ETH/USD candles; built-in
-     Ethereum features are sourced from Ethereum JSON-RPC block data.
+     is empty, fit-db and replay-db first use on-chain DEX WETH/USDC swaps when
+     available, then fall back to a derived Ethereum base-fee series.
+     mars does not fetch centralized-exchange ETH/USD candles; built-in ETH
+     price rows are sourced from Ethereum JSON-RPC logs.
 
 COMMANDS
      make
@@ -111,6 +117,13 @@ COMMANDS
      mars eth-export market.db ethblocks.csv
           Export Ethereum block-level learning features.
 
+     mars dex-update market.db FROM_BLOCK TO_BLOCK [POOL]
+          Fetch on-chain Uniswap V3 swap logs using ETH_RPC_URL. The default
+          pool is mainnet WETH/USDC 0.05%.
+
+     mars dex-export market.db dexswaps.csv [POOL]
+          Export stored DEX swap observations.
+
      mars fred-update market.db SERIES[,SERIES...]
           Fetch FRED observations using FRED_API_KEY.
 
@@ -138,16 +151,35 @@ DATABASE
 
                mars fit-db market.db es.mars my_market_view
 
-     Ethereum base-fee bars
+     Ethereum DEX bars
           When market_bars has fewer than the minimum training rows and no
-          explicit table is supplied, mars reads the basefee_training_bars view.
-          This trains a base-fee movement model, not an ETH spot-price model.
+          explicit table is supplied, mars first reads the dex_training_bars
+          view. This trains an ETH spot-price movement model from on-chain
+          WETH/USDC swaps, not centralized-exchange candles.
+
+          The view derives market-bar-shaped rows from real Uniswap V3 Swap
+          events. It uses sqrtPriceX96 as the spot price, actual swap sizes as
+          depth/volume inputs, Ethereum block fields when present, and FRED
+          macro observations as-of the swap timestamp.
+
+               export ETH_RPC_URL=http://127.0.0.1:8545
+               mars dex-update market.db 19000000 19001000
+               mars dex-update market.db 0 latest
+
+          DEX tables:
+
+               dex_swaps
+               dex_training_bars
+
+     Ethereum base-fee bars
+          If neither market_bars nor dex_training_bars has enough rows, mars
+          reads the basefee_training_bars view. This trains a base-fee movement
+          model, not an ETH spot-price model.
 
           The view derives bid/ask-shaped rows from real eth_block_features:
           base_fee_gwei is scaled by 100 so sub-gwei moves fit the default tick
-          model. Its default auxiliary features are Ethereum-chain fields:
-          gas utilization, transaction count, gas used, gas limit, base fee,
-          and transaction-body aggregates when those bodies were ingested.
+          model. Its default auxiliary features are Ethereum-chain fields and
+          FRED macro observations as-of the block timestamp.
 
      Ethereum chain data
           mars talks to an Ethereum execution JSON-RPC endpoint and calls
@@ -166,6 +198,8 @@ DATABASE
                eth_blocks
                eth_txs
                eth_block_features
+               dex_swaps
+               dex_training_bars
                basefee_training_bars
 
           Block header fields are stored from JSON-RPC observations.
@@ -184,8 +218,9 @@ DATABASE
                fred_observations
 
      Exports
-          eth-export and fred-export are for inspection and interoperability.
-          Export files are no longer part of the training path.
+          eth-export, dex-export, and fred-export are for inspection and
+          interoperability. Export files are no longer part of the training
+          path.
 
 DESIGN
      Instrument choice

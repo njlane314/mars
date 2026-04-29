@@ -130,11 +130,24 @@ static std::string basefee_count_sql(void)
 }
 
 
+static std::string dex_count_sql(void)
+{
+    return "SELECT count(*) FROM dex_training_bars";
+}
+
+
+static std::string dex_training_sql(void)
+{
+    return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
+           "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
+           "FROM dex_training_bars ORDER BY block_number,log_index";
+}
+
+
 static std::string basefee_training_sql(void)
 {
     return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
-           "gas_util,tx_count,gas_used_m,gas_limit_m,base_fee_gwei,"
-           "eth_value_total,input_bytes_total,reserved "
+           "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
            "FROM basefee_training_bars ORDER BY ts";
 }
 
@@ -252,6 +265,17 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
     }
 
     if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL)) {
+        st = count_sql(db, dex_count_sql(), &cap);
+        if (st != MARS_OK) {
+            sqlite3_close(db);
+            return st;
+        }
+        if (cap >= MARS_MIN_TRAIN_ROWS) {
+            sql = dex_training_sql();
+        }
+    }
+
+    if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL) && sql.empty()) {
         st = count_sql(db, basefee_count_sql(), &cap);
         if (st != MARS_OK) {
             sqlite3_close(db);

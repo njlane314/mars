@@ -19,7 +19,7 @@ static void usage(const char *argv0)
                   "  %s fit-db market.db model.mars [table]\n"
                   "  %s replay-db market.db model.mars trades.csv [table]\n"
                   "  %s inspect model.mars\n\n"
-                  "default db source: market_bars; falls back to Ethereum/FRED features\n"
+                  "default db source: market_bars; falls back to DEX/FRED then base fee\n"
                   "defaults: ES/MES-like 1-second bars, horizon=%u bars, tick=%.8f\n",
                   argv0, argv0, argv0,
                   MARS_DEFAULT_HORIZON, MARS_DEFAULT_TICK_SIZE);
@@ -29,12 +29,14 @@ static void usage(const char *argv0)
                   "  %s db-summary market.db\n"
                   "  %s eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]\n"
                   "  %s eth-export market.db ethblocks.csv\n"
+                  "  %s dex-update market.db FROM_BLOCK TO_BLOCK [POOL]\n"
+                  "  %s dex-export market.db dexswaps.csv [POOL]\n"
                   "  %s fred-update market.db SERIES[,SERIES...]\n"
                   "  %s fred-export market.db fred.csv\n\n"
                   "env:\n"
-                  "  ETH_RPC_URL     Ethereum JSON-RPC endpoint for eth-update\n"
+                  "  ETH_RPC_URL     Ethereum JSON-RPC endpoint for eth/dex updates\n"
                   "  FRED_API_KEY    FRED API key for fred-update\n",
-                  argv0, argv0, argv0, argv0, argv0, argv0);
+                  argv0, argv0, argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 static int parse_block_arg(const char *s, uint64_t *out)
@@ -133,6 +135,33 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
         st = mars_eth_export(argv[2], argv[3]);
+    } else if (strcmp(argv[1], "dex-update") == 0) {
+        const char *rpc_url;
+        uint64_t from_block;
+        uint64_t to_block;
+
+        if ((argc != 5) && (argc != 6)) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        if ((parse_block_arg(argv[3], &from_block) == 0) ||
+            (parse_block_arg(argv[4], &to_block) == 0)) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        rpc_url = getenv("ETH_RPC_URL");
+        if ((rpc_url == NULL) || (rpc_url[0] == '\0')) {
+            (void)fprintf(stderr, "mars: ETH_RPC_URL is not set\n");
+            return EXIT_FAILURE;
+        }
+        st = mars_dex_update(argv[2], rpc_url, from_block, to_block,
+                             (argc == 6) ? argv[5] : NULL);
+    } else if (strcmp(argv[1], "dex-export") == 0) {
+        if ((argc != 4) && (argc != 5)) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        st = mars_dex_export(argv[2], argv[3], (argc == 5) ? argv[4] : NULL);
     } else if (strcmp(argv[1], "fred-update") == 0) {
         const char *api_key;
 

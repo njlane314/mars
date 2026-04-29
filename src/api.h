@@ -153,6 +153,11 @@ mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,
                             uint64_t from_block, uint64_t to_block,
                             uint32_t store_txs);
 mars_status_t mars_eth_export(const char *db_path, const char *out_path);
+mars_status_t mars_dex_update(const char *db_path, const char *rpc_url,
+                            uint64_t from_block, uint64_t to_block,
+                            const char *pool);
+mars_status_t mars_dex_export(const char *db_path, const char *out_path,
+                            const char *pool);
 mars_status_t mars_fred_update(const char *db_path, const char *series_list,
                              const char *api_key);
 mars_status_t mars_fred_export(const char *db_path, const char *out_path);

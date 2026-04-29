@@ -15,7 +15,7 @@ BUILDDIR ?= build
 OBJDIR = $(BUILDDIR)/obj
 PROG = $(BUILDDIR)/mars
 
-OBJS = $(OBJDIR)/main.o $(OBJDIR)/core.o $(OBJDIR)/data.o $(OBJDIR)/features.o $(OBJDIR)/scale.o $(OBJDIR)/hmm.o $(OBJDIR)/alpha.o $(OBJDIR)/backtest.o $(OBJDIR)/store.o $(OBJDIR)/report.o $(OBJDIR)/db.o
+OBJS = $(OBJDIR)/main.o $(OBJDIR)/core.o $(OBJDIR)/data.o $(OBJDIR)/features.o $(OBJDIR)/scale.o $(OBJDIR)/hmm.o $(OBJDIR)/alpha.o $(OBJDIR)/backtest.o $(OBJDIR)/store.o $(OBJDIR)/report.o $(OBJDIR)/db.o $(OBJDIR)/dex.o
 
 all: $(PROG)
 
@@ -55,8 +55,11 @@ $(OBJDIR)/store.o: $(SRC)/store.cpp $(SRC)/store.hpp $(SRC)/api.h | $(OBJDIR)
 $(OBJDIR)/report.o: $(SRC)/report.cpp $(SRC)/report.hpp $(SRC)/store.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/report.cpp -o $(OBJDIR)/report.o
 
-$(OBJDIR)/db.o: $(SRC)/db.cpp $(SRC)/api.h | $(OBJDIR)
+$(OBJDIR)/db.o: $(SRC)/db.cpp $(SRC)/api.h $(SRC)/dex.hpp | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/db.cpp -o $(OBJDIR)/db.o
+
+$(OBJDIR)/dex.o: $(SRC)/dex.cpp $(SRC)/dex.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/dex.cpp -o $(OBJDIR)/dex.o
 
 install: $(PROG)
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
