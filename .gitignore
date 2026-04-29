@@ -1,0 +1,7 @@
+mars
+*.o
+*.model
+*.mars
+trades.csv
+__pycache__/
+.DS_Store

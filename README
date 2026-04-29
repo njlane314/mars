@@ -1,0 +1,136 @@
+MARS(1)                         User Commands                         MARS(1)
+
+NAME
+     mars - minimal single-instrument latent-state trading research engine
+
+SYNOPSIS
+     make
+     make install
+
+     mars fit input.csv model.mars
+     mars inspect model.mars
+     mars replay input.csv model.mars trades.csv
+
+     mars databento input.csv --symbol ES.v.0 --stype-in continuous \
+          --start 2025-01-02T14:30 --end 2025-01-02T21:00 \
+
+DESCRIPTION
+     mars is a small research engine for fitting, inspecting, and replaying a
+     latent-state trading model for one instrument at a time.
+
+     The intended first instrument is CME ES/MES 1-second top-of-book bars.
+
+FILES
+     mars.c
+          Plain C command entrypoint and argument dispatch.
+
+     mars_api.h
+          C-compatible boundary, status codes, constants, and shared POD
+          model/data types.
+
+     mars_core.cpp
+          C++ orchestration over focused module classes.
+
+     csv.cpp, csv.hpp
+          CsvData: load and release market data.
+
+     features.cpp, features.hpp
+          FeatureBuilder: construct model features from market rows.
+
+     scale.cpp, scale.hpp
+          ScalerOps: fit/apply scalers and build feature matrices.
+
+     hmm.cpp, hmm.hpp
+          HmmModel: fit and filter latent states.
+
+     alpha.cpp, alpha.hpp
+          AlphaModel: train and apply the sparse alpha model.
+
+     backtest.cpp, backtest.hpp
+          Backtester: replay predictions into PnL and trade output.
+
+     model_store.cpp, model_store.hpp
+          ModelStore: default config, validation, save, and load.
+
+     report.cpp, report.hpp
+          Reporter: stats and model inspection output.
+
+     Makefile
+          Builds and installs mars. The Databento API input command links
+          against libcurl.
+
+INPUT
+     The input CSV schema is:
+
+          ts,bid,ask,bid_sz,ask_sz,volume
+          1700000000,5000.00,5000.25,115,103,90
+
+     Databento API input can be normalized into this schema by the C binary.
+     The command uses Databento's Historical HTTP API and reads the API key
+     from DATABENTO_API_KEY.
+
+          export DATABENTO_API_KEY=...
+          ./mars databento es_1s.csv --dataset GLBX.MDP3 \
+               --symbol ES.v.0 --stype-in continuous --schema bbo-1s \
+               --start 2025-01-02T14:30 --end 2025-01-02T21:00
+          ./mars fit es_1s.csv es.mars
+
+     The default Databento schema is bbo-1s. For raw top-of-book updates, pass
+     --schema mbp-1. Databento records are aggregated to one row per second
+     using the last top-of-book quote and summed trade size where the schema
+     carries trade actions.
+
+COMMANDS
+     make
+          Build the mars binary.
+
+     make install
+          Install mars to PREFIX/bin. PREFIX defaults to /usr/local.
+
+     make install PREFIX=$HOME/.local
+          Install mars to $HOME/.local/bin for a user-local setup.
+          Ensure $HOME/.local/bin is in PATH to run mars by name.
+
+     mars fit es_1s.csv es.mars
+          Fit a model.
+
+     mars inspect es.mars
+          Inspect learned latent states and sparse alpha coefficients.
+
+     mars replay es_1s.csv es.mars trades.csv
+          Replay or backtest a fitted model.
+
+     mars databento es_1s.csv --symbol ES.v.0 --stype-in continuous \
+          --start 2025-01-02T14:30 --end 2025-01-02T21:00
+          Fetch Databento top-of-book data through the Historical HTTP API and
+          write a MARS input CSV. Optional flags include --dataset, --schema,
+          --limit, and --api-key-env.
+
+DESIGN
+     Instrument choice
+          ES/MES first, because it is centralized, liquid, tick-discrete,
+          high-frequency enough to learn microstructure states, and avoids
+          corporate actions, borrow, and fragmented equity NBBO reconstruction.
+
+     Latent states
+          Learned by causal diagonal-Gaussian HMM filtering. States are not
+          manually named. Inspect state emission means after fitting.
+
+     Alpha
+          Regime-interacted elastic net. Rich enough to condition on latent
+          regimes; sparse enough to avoid feature proliferation.
+
+     Execution model
+          One-unit position in {-1,0,+1}, hard spread guard, cost threshold,
+          and validation gate. If validation is not positive after costs, the
+          saved model is deployment-disabled with pos_max=0.
+
+     Style
+          Single binary, plain Makefile, C command surface, C++ core behind a
+          small C ABI, deterministic replay, checked return values, no
+          recursion, and bounded inner loops.
+
+STATUS
+     This is a research scaffold. It is not a broker adapter, not a live
+     execution engine, and not a claim about Renaissance Technologies' actual
+     code.
