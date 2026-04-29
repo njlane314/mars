@@ -28,6 +28,7 @@
 #define RT_EPS                  1.0e-12
 #define RT_VAR_FLOOR            1.0e-4
 #define RT_LOG_ZERO             (-1.0e300)
+#define RT_ETH_LATEST           UINT64_MAX
 
 typedef enum
 {
@@ -143,6 +144,14 @@ extern "C" {
 rt_status_t mars_fit(const char *csv_path, const char *model_path);
 rt_status_t mars_replay(const char *csv_path, const char *model_path, const char *trades_path);
 rt_status_t mars_inspect(const char *model_path);
+rt_status_t mars_db_init(const char *db_path);
+rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
+                            uint64_t from_block, uint64_t to_block,
+                            uint32_t store_txs);
+rt_status_t mars_eth_export(const char *db_path, const char *csv_path);
+rt_status_t mars_fred_update(const char *db_path, const char *series_csv,
+                             const char *api_key);
+rt_status_t mars_fred_export(const char *db_path, const char *csv_path);
 
 #ifdef __cplusplus
 }

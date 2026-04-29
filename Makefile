@@ -2,12 +2,16 @@ CC ?= cc
 CXX ?= c++
 CFLAGS ?= -std=c99 -O2 -Wall -Wextra -Werror -pedantic
 CXXFLAGS ?= -std=c++17 -O2 -Wall -Wextra -Werror -pedantic
-LDFLAGS ?= -lm -lcurl
+LDFLAGS ?= -lm -lcurl -lsqlite3
+SDKROOT ?= $(shell xcrun --show-sdk-path 2>/dev/null)
+ifneq ($(SDKROOT),)
+CXXFLAGS += -isystem $(SDKROOT)/usr/include/c++/v1
+endif
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
 
-OBJS = mars.o mars_core.o csv.o features.o scale.o hmm.o alpha.o backtest.o model_store.o report.o
+OBJS = mars.o mars_core.o csv.o features.o scale.o hmm.o alpha.o backtest.o model_store.o report.o db.o
 
 all: mars
 
@@ -43,6 +47,9 @@ model_store.o: model_store.cpp model_store.hpp mars_api.h
 
 report.o: report.cpp report.hpp model_store.hpp mars_api.h
 	$(CXX) $(CXXFLAGS) -c report.cpp
+
+db.o: db.cpp mars_api.h
+	$(CXX) $(CXXFLAGS) -c db.cpp
 
 install: mars
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"

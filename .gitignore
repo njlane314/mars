@@ -2,6 +2,9 @@ mars
 *.o
 *.model
 *.mars
+*.db
+*.db-wal
+*.db-shm
 trades.csv
 __pycache__/
 .DS_Store
