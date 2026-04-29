@@ -18,6 +18,15 @@
 
 namespace {
 
+struct candle {
+    uint64_t ts;
+    double low;
+    double high;
+    double open;
+    double close;
+    double volume;
+};
+
 static size_t http_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
 {
     std::string *buf = static_cast<std::string *>(userdata);
@@ -241,6 +250,20 @@ static mars_status_t db_schema(sqlite3 *db)
         " ask_sz REAL NOT NULL,"
         " volume REAL NOT NULL"
         ");"
+        "CREATE TABLE IF NOT EXISTS eth_spot_bars("
+        " source TEXT NOT NULL,"
+        " product TEXT NOT NULL,"
+        " granularity INTEGER NOT NULL,"
+        " ts INTEGER NOT NULL,"
+        " low REAL NOT NULL,"
+        " high REAL NOT NULL,"
+        " open REAL NOT NULL,"
+        " close REAL NOT NULL,"
+        " volume REAL NOT NULL,"
+        " PRIMARY KEY(source,product,granularity,ts)"
+        ");"
+        "CREATE INDEX IF NOT EXISTS eth_spot_bars_time_idx "
+        "ON eth_spot_bars(granularity,ts);"
         "CREATE TABLE IF NOT EXISTS eth_blocks("
         " number INTEGER PRIMARY KEY,"
         " hash TEXT NOT NULL,"
@@ -301,7 +324,45 @@ static mars_status_t db_schema(sqlite3 *db)
     }
 
     static const char *view_sql =
+        "DROP VIEW IF EXISTS eth_spot_training_bars;"
         "DROP VIEW IF EXISTS basefee_training_bars;"
+        "CREATE VIEW eth_spot_training_bars AS "
+        "SELECT p.ts AS ts,"
+        " p.close AS bid,"
+        " p.close AS ask,"
+        " p.volume * 0.5 AS bid_sz,"
+        " p.volume * 0.5 AS ask_sz,"
+        " p.volume AS volume,"
+        " CASE WHEN p.close > 0.0 THEN (p.high - p.low) / p.close ELSE 0.0 END AS range_pct,"
+        " CASE WHEN p.open > 0.0 THEN (p.close - p.open) / p.open ELSE 0.0 END AS body_pct,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS2' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs2,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DGS10' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs10,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='T10Y2Y' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS t10y2y,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='VIXCLS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS vixcls,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='DTWEXBGS' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dtwexbgs,"
+        " coalesce((SELECT value_real FROM fred_observations f "
+        "  WHERE f.series_id='WALCL' AND f.value_real IS NOT NULL "
+        "  AND f.date <= date(p.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS walcl "
+        "FROM eth_spot_bars p "
+        "WHERE p.source='coinbase' "
+        "AND p.product='ETH-USD' "
+        "AND p.granularity=coalesce("
+        " (SELECT CAST(last_key AS INTEGER) FROM ingest_state WHERE source='spot_granularity'),300) "
+        "AND p.close > 0.0 "
+        "AND p.open > 0.0 "
+        "AND p.low > 0.0 "
+        "AND p.high >= p.low "
+        "AND p.volume >= 0.0;"
         "CREATE VIEW basefee_training_bars AS "
         "SELECT e.ts AS ts,"
         " (e.base_fee_gwei * 100.0) - "
@@ -659,6 +720,232 @@ static int get_state_u64(sqlite3 *db, const char *key, uint64_t *v)
     }
     sqlite3_finalize(stmt);
     return found;
+}
+
+static int spot_granularity_valid(uint32_t granularity)
+{
+    return ((granularity == 60U) || (granularity == 300U) ||
+            (granularity == 900U) || (granularity == 3600U) ||
+            (granularity == 21600U) || (granularity == 86400U)) ? 1 : 0;
+}
+
+static int64_t days_from_civil(int y, unsigned m, unsigned d)
+{
+    const int adj = (m <= 2U) ? 1 : 0;
+    const int era = ((y - adj) >= 0) ? ((y - adj) / 400) : ((y - adj - 399) / 400);
+    const unsigned yoe = (unsigned)((y - adj) - (era * 400));
+    const unsigned mp = (unsigned)((int)m + ((m > 2U) ? -3 : 9));
+    const unsigned doy = ((153U * mp) + 2U) / 5U + d - 1U;
+    const unsigned doe = (yoe * 365U) + (yoe / 4U) - (yoe / 100U) + doy;
+    return ((int64_t)era * 146097) + (int64_t)doe - 719468;
+}
+
+static int parse_time_arg(const char *s, uint64_t *out)
+{
+    int y;
+    unsigned mo;
+    unsigned d;
+    unsigned h = 0U;
+    unsigned mi = 0U;
+    unsigned sec = 0U;
+    int used = 0;
+    int64_t days;
+    const char *p;
+
+    if ((s == NULL) || (out == NULL) || (s[0] == '\0')) {
+        return 0;
+    }
+
+    for (p = s; *p != '\0'; ++p) {
+        if (isdigit((unsigned char)*p) == 0) {
+            break;
+        }
+    }
+    if (*p == '\0') {
+        char *endp = NULL;
+        unsigned long long v;
+
+        errno = 0;
+        v = strtoull(s, &endp, 10);
+        if ((errno != 0) || (endp == s) || (*endp != '\0')) {
+            return 0;
+        }
+        *out = (uint64_t)v;
+        return 1;
+    }
+
+    if (sscanf(s, "%4d-%2u-%2uT%2u:%2u:%2uZ%n", &y, &mo, &d, &h, &mi, &sec, &used) == 6) {
+        if (s[used] != '\0') {
+            return 0;
+        }
+    } else if (sscanf(s, "%4d-%2u-%2u%n", &y, &mo, &d, &used) == 3) {
+        if (s[used] != '\0') {
+            return 0;
+        }
+    } else {
+        return 0;
+    }
+
+    if ((mo < 1U) || (mo > 12U) || (d < 1U) || (d > 31U) ||
+        (h > 23U) || (mi > 59U) || (sec > 59U)) {
+        return 0;
+    }
+
+    days = days_from_civil(y, mo, d);
+    if (days < 0) {
+        return 0;
+    }
+
+    *out = ((uint64_t)days * 86400U) + ((uint64_t)h * 3600U) +
+           ((uint64_t)mi * 60U) + (uint64_t)sec;
+    return 1;
+}
+
+static std::string iso_time(uint64_t ts)
+{
+    time_t t = (time_t)ts;
+    struct tm tmv;
+    char buf[32];
+
+    if (gmtime_r(&t, &tmv) == NULL) {
+        return std::string();
+    }
+
+    (void)snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02dZ",
+                   tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday,
+                   tmv.tm_hour, tmv.tm_min, tmv.tm_sec);
+    return std::string(buf);
+}
+
+static void skip_space(const char **p)
+{
+    while ((*p != NULL) && (**p != '\0') && (isspace((unsigned char)**p) != 0)) {
+        ++(*p);
+    }
+}
+
+static int parse_json_number(const char **p, double *out)
+{
+    char *endp = NULL;
+    double v;
+
+    if ((p == NULL) || (*p == NULL) || (out == NULL)) {
+        return 0;
+    }
+
+    skip_space(p);
+    errno = 0;
+    v = strtod(*p, &endp);
+    if ((errno != 0) || (endp == *p) || (isfinite(v) == 0)) {
+        return 0;
+    }
+
+    *out = v;
+    *p = endp;
+    return 1;
+}
+
+static mars_status_t parse_spot_candles(const std::string &json, std::vector<candle> *out)
+{
+    const char *p;
+
+    if (out == NULL) {
+        return MARS_ERR_ARG;
+    }
+
+    out->clear();
+    p = json.c_str();
+    while ((p = strchr(p, '[')) != NULL) {
+        double v[6];
+        int i;
+
+        ++p;
+        skip_space(&p);
+        if (*p == '[') {
+            continue;
+        }
+        if ((*p == ']') || (*p == '\0')) {
+            break;
+        }
+
+        for (i = 0; i < 6; ++i) {
+            if (parse_json_number(&p, &v[i]) == 0) {
+                return MARS_ERR_PARSE;
+            }
+            skip_space(&p);
+            if (i < 5) {
+                if (*p != ',') {
+                    return MARS_ERR_PARSE;
+                }
+                ++p;
+            }
+        }
+        skip_space(&p);
+        if (*p != ']') {
+            return MARS_ERR_PARSE;
+        }
+        ++p;
+
+        if ((v[0] >= 0.0) && (v[1] > 0.0) && (v[2] >= v[1]) &&
+            (v[3] > 0.0) && (v[4] > 0.0) && (v[5] >= 0.0)) {
+            candle c;
+
+            c.ts = (uint64_t)v[0];
+            c.low = v[1];
+            c.high = v[2];
+            c.open = v[3];
+            c.close = v[4];
+            c.volume = v[5];
+            out->push_back(c);
+        }
+    }
+
+    return MARS_OK;
+}
+
+static std::string spot_url(uint64_t from_ts, uint64_t to_ts, uint32_t granularity)
+{
+    char buf[64];
+    std::string url = "https://api.exchange.coinbase.com/products/ETH-USD/candles?";
+
+    (void)snprintf(buf, sizeof(buf), "%u", granularity);
+    url += "granularity=";
+    url += buf;
+    url += "&start=";
+    url += iso_time(from_ts);
+    url += "&end=";
+    url += iso_time(to_ts);
+    return url;
+}
+
+static mars_status_t store_spot_candles(sqlite3_stmt *stmt,
+                                        const std::vector<candle> &candles,
+                                        uint32_t granularity)
+{
+    size_t i;
+    mars_status_t st;
+
+    if (stmt == NULL) {
+        return MARS_ERR_ARG;
+    }
+
+    for (i = 0U; i < candles.size(); ++i) {
+        const candle &c = candles[i];
+
+        (void)sqlite3_bind_int64(stmt, 1, (sqlite3_int64)granularity);
+        (void)sqlite3_bind_int64(stmt, 2, (sqlite3_int64)c.ts);
+        (void)sqlite3_bind_double(stmt, 3, c.low);
+        (void)sqlite3_bind_double(stmt, 4, c.high);
+        (void)sqlite3_bind_double(stmt, 5, c.open);
+        (void)sqlite3_bind_double(stmt, 6, c.close);
+        (void)sqlite3_bind_double(stmt, 7, c.volume);
+        st = sqlite_step_done(stmt);
+        if (st != MARS_OK) {
+            return st;
+        }
+    }
+
+    return MARS_OK;
 }
 
 static mars_status_t eth_rpc(const char *rpc_url, const std::string &method,
@@ -1162,6 +1449,7 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
 {
     sqlite3 *db = NULL;
     sqlite3_int64 market_rows = 0;
+    sqlite3_int64 spot_rows = 0;
     sqlite3_int64 basefee_rows = 0;
     mars_status_t st;
 
@@ -1179,6 +1467,22 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
 
     st = print_summary_row(db, "market_bars",
         "SELECT count(*) AS rows FROM market_bars");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "eth_spot_bars",
+        "SELECT count(*) AS rows,min(granularity) AS min_granularity,"
+        "max(granularity) AS max_granularity,"
+        "datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc FROM eth_spot_bars");
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
+    st = print_summary_row(db, "eth_spot_training_bars",
+        "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
+        "datetime(max(ts),'unixepoch') AS last_utc FROM eth_spot_training_bars");
     if (st != MARS_OK) {
         sqlite3_close(db);
         return st;
@@ -1229,6 +1533,11 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
         sqlite3_close(db);
         return st;
     }
+    st = summary_i64(db, "SELECT count(*) FROM eth_spot_training_bars", &spot_rows);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        return st;
+    }
     st = summary_i64(db, "SELECT count(*) FROM basefee_training_bars", &basefee_rows);
     if (st != MARS_OK) {
         sqlite3_close(db);
@@ -1238,6 +1547,9 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
     if (market_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
         (void)printf("training_source: market_bars rows=%lld min_rows=%u\n",
                      (long long)market_rows, MARS_MIN_TRAIN_ROWS);
+    } else if (spot_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
+        (void)printf("training_source: eth_spot_training_bars rows=%lld min_rows=%u\n",
+                     (long long)spot_rows, MARS_MIN_TRAIN_ROWS);
     } else if (basefee_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
         (void)printf("training_source: basefee_training_bars rows=%lld min_rows=%u\n",
                      (long long)basefee_rows, MARS_MIN_TRAIN_ROWS);
@@ -1247,6 +1559,121 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
 
     sqlite3_close(db);
     return MARS_OK;
+}
+
+extern "C" mars_status_t mars_spot_update(const char *db_path, const char *from_utc,
+                                          const char *to_utc, uint32_t granularity)
+{
+    sqlite3 *db = NULL;
+    sqlite3_stmt *stmt = NULL;
+    uint64_t from_ts;
+    uint64_t to_ts;
+    uint64_t cur;
+    uint64_t total = 0U;
+    const uint64_t max_points = 299U;
+    mars_status_t st;
+
+    if ((db_path == NULL) || (from_utc == NULL) || (to_utc == NULL) ||
+        (spot_granularity_valid(granularity) == 0) ||
+        (parse_time_arg(from_utc, &from_ts) == 0) ||
+        (parse_time_arg(to_utc, &to_ts) == 0) ||
+        (from_ts >= to_ts)) {
+        return MARS_ERR_ARG;
+    }
+
+    if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
+        return MARS_ERR_IO;
+    }
+
+    st = db_open(db_path, &db);
+    if (st != MARS_OK) {
+        curl_global_cleanup();
+        return st;
+    }
+    st = db_schema(db);
+    if (st != MARS_OK) {
+        sqlite3_close(db);
+        curl_global_cleanup();
+        return st;
+    }
+
+    if (sqlite3_prepare_v2(db,
+        "INSERT OR REPLACE INTO eth_spot_bars"
+        "(source,product,granularity,ts,low,high,open,close,volume)"
+        " VALUES('coinbase','ETH-USD',?,?,?,?,?,?,?)",
+        -1, &stmt, NULL) != SQLITE_OK) {
+        sqlite3_close(db);
+        curl_global_cleanup();
+        return MARS_ERR_IO;
+    }
+
+    st = sql_exec(db, "BEGIN IMMEDIATE");
+    if (st != MARS_OK) {
+        sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        curl_global_cleanup();
+        return st;
+    }
+
+    for (cur = from_ts; cur < to_ts;) {
+        const uint64_t span = (uint64_t)granularity * max_points;
+        uint64_t next = cur + span;
+        std::vector<candle> candles;
+        std::string json;
+
+        if ((next < cur) || (next > to_ts)) {
+            next = to_ts;
+        }
+
+        st = http_get(spot_url(cur, next, granularity), &json);
+        if (st != MARS_OK) {
+            break;
+        }
+        st = parse_spot_candles(json, &candles);
+        if (st != MARS_OK) {
+            break;
+        }
+        st = store_spot_candles(stmt, candles, granularity);
+        if (st != MARS_OK) {
+            break;
+        }
+
+        total += (uint64_t)candles.size();
+        if ((total > 0U) && ((total % 5000U) < candles.size())) {
+            (void)fprintf(stderr, "spot-update: stored %llu candles through %s\n",
+                          (unsigned long long)total, iso_time(next).c_str());
+        }
+
+        if (next >= to_ts) {
+            break;
+        }
+        cur = next;
+    }
+
+    if (st == MARS_OK) {
+        st = set_state(db, "spot_granularity", granularity);
+    }
+    if (st == MARS_OK) {
+        st = set_state(db, "spot_first_ts", from_ts);
+    }
+    if (st == MARS_OK) {
+        st = set_state(db, "spot_last_ts", to_ts);
+    }
+
+    if (st == MARS_OK) {
+        st = sql_exec(db, "COMMIT");
+    } else {
+        (void)sql_exec(db, "ROLLBACK");
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    curl_global_cleanup();
+    if (st == MARS_OK) {
+        (void)fprintf(stderr, "spot-update: stored %llu candles total\n",
+                      (unsigned long long)total);
+    }
+    return st;
 }
 
 extern "C" mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,

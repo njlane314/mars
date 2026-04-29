@@ -149,6 +149,8 @@ mars_status_t mars_replay_db(const char *db_path, const char *table,
 mars_status_t mars_inspect(const char *model_path);
 mars_status_t mars_db_init(const char *db_path);
 mars_status_t mars_db_summary(const char *db_path);
+mars_status_t mars_spot_update(const char *db_path, const char *from_utc,
+                             const char *to_utc, uint32_t granularity);
 mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,
                             uint64_t from_block, uint64_t to_block,
                             uint32_t store_txs);

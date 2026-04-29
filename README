@@ -13,6 +13,7 @@ SYNOPSIS
 
      mars db-init market.db
      mars db-summary market.db
+     mars spot-update market.db FROM_UTC TO_UTC [GRANULARITY]
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
      mars eth-export market.db ethblocks.csv
      mars fred-update market.db SERIES[,SERIES...]
@@ -69,8 +70,8 @@ FILES
 INPUT
      DB commands write local SQLite data. Training reads market bars directly
      from SQLite through fit-db and replay-db. If the default market_bars table
-     is empty, fit-db and replay-db derive a trainable Ethereum base-fee series
-     from eth_block_features and add as-of FRED observations as model features.
+     is empty, fit-db and replay-db train from ETH spot candles when present,
+     otherwise they fall back to an Ethereum base-fee series.
 
 COMMANDS
      make
@@ -102,6 +103,12 @@ COMMANDS
      mars db-summary market.db
           Print table counts, Ethereum/FRED date coverage, and the source that
           fit-db will train from by default.
+
+     mars spot-update market.db FROM_UTC TO_UTC [GRANULARITY]
+          Fetch ETH-USD spot candles from Coinbase Exchange into SQLite.
+          FROM_UTC and TO_UTC can be YYYY-MM-DD, YYYY-MM-DDTHH:MM:SSZ, or Unix
+          seconds. GRANULARITY defaults to 300 seconds and must be one of:
+          60, 300, 900, 3600, 21600, or 86400.
 
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
           Fetch Ethereum block and optional transaction data using ETH_RPC_URL.
@@ -136,10 +143,25 @@ DATABASE
 
                mars fit-db market.db es.mars my_market_view
 
+     ETH spot bars
+          ETH spot training uses real Coinbase Exchange ETH-USD OHLCV candles
+          stored in eth_spot_bars:
+
+               mars spot-update market.db 2025-04-29 2026-04-29T21:00:00Z 300
+               mars fit-db market.db eth.mars
+
+          The eth_spot_training_bars view converts close and volume into the
+          row shape expected by the model. The modeled price is the real candle
+          close. Auxiliary features include candle range/body and the latest
+          available DGS2, DGS10, T10Y2Y, VIXCLS, DTWEXBGS, and WALCL values.
+          The view does not claim to reconstruct a real order book; close and
+          volume are used as a training-compatible price/size surface.
+
      Ethereum/FRED base-fee bars
           When market_bars has fewer than the minimum training rows and no
-          explicit table is supplied, mars reads the basefee_training_bars view.
-          This trains a base-fee movement model, not an ETH spot-price model.
+          explicit table is supplied and no spot bars are present, mars reads
+          the basefee_training_bars view. This trains a base-fee movement model,
+          not an ETH spot-price model.
 
           The view derives bid/ask-shaped rows from real eth_block_features:
           base_fee_gwei is scaled by 100 so sub-gwei moves fit the default tick
@@ -164,6 +186,8 @@ DATABASE
                eth_blocks
                eth_txs
                eth_block_features
+               eth_spot_bars
+               eth_spot_training_bars
                basefee_training_bars
 
           Block header fields are stored from JSON-RPC observations.

@@ -124,6 +124,20 @@ static mars_status_t count_rows(sqlite3 *db, const char *table, size_t *n_out)
 }
 
 
+static std::string spot_count_sql(void)
+{
+    return "SELECT count(*) FROM eth_spot_training_bars";
+}
+
+
+static std::string spot_training_sql(void)
+{
+    return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
+           "range_pct,body_pct,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
+           "FROM eth_spot_training_bars ORDER BY ts";
+}
+
+
 static std::string basefee_count_sql(void)
 {
     return "SELECT count(*) FROM basefee_training_bars";
@@ -248,6 +262,17 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
     if (st != MARS_OK) {
         sqlite3_close(db);
         return st;
+    }
+
+    if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL)) {
+        st = count_sql(db, spot_count_sql(), &cap);
+        if (st != MARS_OK) {
+            sqlite3_close(db);
+            return st;
+        }
+        if (cap >= MARS_MIN_TRAIN_ROWS) {
+            sql = spot_training_sql();
+        }
     }
 
     if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL)) {

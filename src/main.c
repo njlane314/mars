@@ -19,7 +19,7 @@ static void usage(const char *argv0)
                   "  %s fit-db market.db model.mars [table]\n"
                   "  %s replay-db market.db model.mars trades.csv [table]\n"
                   "  %s inspect model.mars\n\n"
-                  "default db source: market_bars; falls back to Ethereum/FRED features\n"
+                  "default db source: market_bars; falls back to ETH spot, then base fee\n"
                   "defaults: ES/MES-like 1-second bars, horizon=%u bars, tick=%.8f\n",
                   argv0, argv0, argv0,
                   MARS_DEFAULT_HORIZON, MARS_DEFAULT_TICK_SIZE);
@@ -27,6 +27,7 @@ static void usage(const char *argv0)
                   "\ndb commands:\n"
                   "  %s db-init market.db\n"
                   "  %s db-summary market.db\n"
+                  "  %s spot-update market.db FROM_UTC TO_UTC [GRANULARITY]\n"
                   "  %s eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]\n"
                   "  %s eth-export market.db ethblocks.csv\n"
                   "  %s fred-update market.db SERIES[,SERIES...]\n"
@@ -34,7 +35,7 @@ static void usage(const char *argv0)
                   "env:\n"
                   "  ETH_RPC_URL     Ethereum JSON-RPC endpoint for eth-update\n"
                   "  FRED_API_KEY    FRED API key for fred-update\n",
-                  argv0, argv0, argv0, argv0, argv0, argv0);
+                  argv0, argv0, argv0, argv0, argv0, argv0, argv0);
 }
 
 static int parse_block_arg(const char *s, uint64_t *out)
@@ -57,6 +58,25 @@ static int parse_block_arg(const char *s, uint64_t *out)
     }
 
     *out = (uint64_t)v;
+    return 1;
+}
+
+static int parse_u32_arg(const char *s, uint32_t *out)
+{
+    char *endp = NULL;
+    unsigned long v;
+
+    if ((s == NULL) || (out == NULL)) {
+        return 0;
+    }
+
+    errno = 0;
+    v = strtoul(s, &endp, 10);
+    if ((errno != 0) || (endp == s) || (*endp != '\0') || (v > UINT32_MAX)) {
+        return 0;
+    }
+
+    *out = (uint32_t)v;
     return 1;
 }
 
@@ -99,6 +119,18 @@ int main(int argc, char **argv)
             return EXIT_FAILURE;
         }
         st = mars_db_summary(argv[2]);
+    } else if (strcmp(argv[1], "spot-update") == 0) {
+        uint32_t granularity = 300U;
+
+        if ((argc != 5) && (argc != 6)) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        if ((argc == 6) && (parse_u32_arg(argv[5], &granularity) == 0)) {
+            usage(argv[0]);
+            return EXIT_FAILURE;
+        }
+        st = mars_spot_update(argv[2], argv[3], argv[4], granularity);
     } else if (strcmp(argv[1], "eth-update") == 0) {
         const char *rpc_url;
         uint64_t from_block;
