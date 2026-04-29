@@ -14,7 +14,7 @@
 #include <utility>
 #include <vector>
 
-#include "mars_api.h"
+#include "api.h"
 
 namespace {
 
@@ -33,7 +33,7 @@ static size_t http_write_cb(char *ptr, size_t size, size_t nmemb, void *userdata
     return n;
 }
 
-static rt_status_t http_post_json(const char *url, const std::string &payload, std::string *out)
+static mars_status_t http_post_json(const char *url, const std::string &payload, std::string *out)
 {
     CURL *curl;
     CURLcode rc;
@@ -42,18 +42,18 @@ static rt_status_t http_post_json(const char *url, const std::string &payload, s
     HttpBuf buf;
 
     if ((url == NULL) || (out == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     curl = curl_easy_init();
     if (curl == NULL) {
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     headers = curl_slist_append(headers, "Content-Type: application/json");
     if (headers == NULL) {
         curl_easy_cleanup(curl);
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     (void)curl_easy_setopt(curl, CURLOPT_URL, url);
@@ -72,14 +72,14 @@ static rt_status_t http_post_json(const char *url, const std::string &payload, s
     curl_easy_cleanup(curl);
 
     if ((rc != CURLE_OK) || (code < 200L) || (code >= 300L)) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     *out = buf.body;
-    return RT_OK;
+    return MARS_OK;
 }
 
-static rt_status_t http_get(const std::string &url, std::string *out)
+static mars_status_t http_get(const std::string &url, std::string *out)
 {
     CURL *curl;
     CURLcode rc;
@@ -87,12 +87,12 @@ static rt_status_t http_get(const std::string &url, std::string *out)
     HttpBuf buf;
 
     if (out == NULL) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     curl = curl_easy_init();
     if (curl == NULL) {
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     (void)curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -107,20 +107,20 @@ static rt_status_t http_get(const std::string &url, std::string *out)
     curl_easy_cleanup(curl);
 
     if ((rc != CURLE_OK) || (code < 200L) || (code >= 300L)) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     *out = buf.body;
-    return RT_OK;
+    return MARS_OK;
 }
 
-static rt_status_t sql_exec(sqlite3 *db, const char *sql)
+static mars_status_t sql_exec(sqlite3 *db, const char *sql)
 {
     char *err = NULL;
     int rc;
 
     if ((db == NULL) || (sql == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     rc = sqlite3_exec(db, sql, NULL, NULL, &err);
@@ -129,19 +129,19 @@ static rt_status_t sql_exec(sqlite3 *db, const char *sql)
             (void)fprintf(stderr, "sqlite: %s\n", err);
             sqlite3_free(err);
         }
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
-    return RT_OK;
+    return MARS_OK;
 }
 
-static rt_status_t db_open(const char *path, sqlite3 **db_out)
+static mars_status_t db_open(const char *path, sqlite3 **db_out)
 {
     sqlite3 *db = NULL;
     int rc;
 
     if ((path == NULL) || (db_out == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     rc = sqlite3_open(path, &db);
@@ -149,14 +149,14 @@ static rt_status_t db_open(const char *path, sqlite3 **db_out)
         if (db != NULL) {
             sqlite3_close(db);
         }
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     *db_out = db;
-    return RT_OK;
+    return MARS_OK;
 }
 
-static rt_status_t db_schema(sqlite3 *db)
+static mars_status_t db_schema(sqlite3 *db)
 {
     static const char *sql =
         "PRAGMA journal_mode=WAL;"
@@ -170,6 +170,14 @@ static rt_status_t db_schema(sqlite3 *db)
         " source TEXT PRIMARY KEY,"
         " last_key TEXT NOT NULL,"
         " updated_at INTEGER NOT NULL"
+        ");"
+        "CREATE TABLE IF NOT EXISTS market_bars("
+        " ts INTEGER PRIMARY KEY,"
+        " bid REAL NOT NULL,"
+        " ask REAL NOT NULL,"
+        " bid_sz REAL NOT NULL,"
+        " ask_sz REAL NOT NULL,"
+        " volume REAL NOT NULL"
         ");"
         "CREATE TABLE IF NOT EXISTS eth_blocks("
         " number INTEGER PRIMARY KEY,"
@@ -424,15 +432,15 @@ static void collect_json_objects(const std::string &s, size_t lo, size_t hi,
     }
 }
 
-static rt_status_t sqlite_step_done(sqlite3_stmt *stmt)
+static mars_status_t sqlite_step_done(sqlite3_stmt *stmt)
 {
     const int rc = sqlite3_step(stmt);
     if (rc != SQLITE_DONE) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     (void)sqlite3_reset(stmt);
     (void)sqlite3_clear_bindings(stmt);
-    return RT_OK;
+    return MARS_OK;
 }
 
 static void bind_text_or_null(sqlite3_stmt *stmt, int col, const std::string &s)
@@ -444,22 +452,22 @@ static void bind_text_or_null(sqlite3_stmt *stmt, int col, const std::string &s)
     }
 }
 
-static rt_status_t set_state(sqlite3 *db, const char *key, uint64_t v)
+static mars_status_t set_state(sqlite3 *db, const char *key, uint64_t v)
 {
     sqlite3_stmt *stmt = NULL;
     char buf[64];
     int rc;
-    rt_status_t st;
+    mars_status_t st;
 
     if ((db == NULL) || (key == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     rc = sqlite3_prepare_v2(db,
         "INSERT OR REPLACE INTO ingest_state(source,last_key,updated_at) VALUES(?,?,strftime('%s','now'))",
         -1, &stmt, NULL);
     if (rc != SQLITE_OK) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     (void)snprintf(buf, sizeof(buf), "%llu", (unsigned long long)v);
@@ -494,13 +502,13 @@ static int get_state_u64(sqlite3 *db, const char *key, uint64_t *v)
     return found;
 }
 
-static rt_status_t eth_rpc(const char *rpc_url, const std::string &method,
+static mars_status_t eth_rpc(const char *rpc_url, const std::string &method,
                            const std::string &params, std::string *json)
 {
     std::string payload;
 
     if ((rpc_url == NULL) || (json == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     payload = "{\"jsonrpc\":\"2.0\",\"method\":\"" + method +
@@ -508,26 +516,26 @@ static rt_status_t eth_rpc(const char *rpc_url, const std::string &method,
     return http_post_json(rpc_url, payload, json);
 }
 
-static rt_status_t eth_latest_block(const char *rpc_url, uint64_t *out)
+static mars_status_t eth_latest_block(const char *rpc_url, uint64_t *out)
 {
     std::string json;
     std::string r;
-    rt_status_t st;
+    mars_status_t st;
 
     if (out == NULL) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     st = eth_rpc(rpc_url, "eth_blockNumber", "[]", &json);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
     r = json_string(json, "result");
     if (r.empty()) {
-        return RT_ERR_PARSE;
+        return MARS_ERR_PARSE;
     }
     *out = hex_to_u64_sat(r);
-    return RT_OK;
+    return MARS_OK;
 }
 
 static std::string block_param(uint64_t n)
@@ -537,7 +545,7 @@ static std::string block_param(uint64_t n)
     return std::string("[\"") + buf + "\",true]";
 }
 
-static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_stmt,
+static mars_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_stmt,
                                    sqlite3_stmt *tx_stmt, const std::string &json,
                                    uint32_t store_txs)
 {
@@ -559,14 +567,14 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
     double total_eth = 0.0;
     uint64_t total_input_bytes = 0U;
     size_t i;
-    rt_status_t st;
+    mars_status_t st;
 
     if ((block_stmt == NULL) || (feat_stmt == NULL) || json.empty()) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     if (json_array_range(json, "transactions", &tx_lo, &tx_hi) == 0) {
-        return RT_ERR_PARSE;
+        return MARS_ERR_PARSE;
     }
 
     h = json_string_range(json, "hash", 0U, tx_lo);
@@ -578,7 +586,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
     base_fee_hex = json_string_range(json, "baseFeePerGas", 0U, tx_lo);
 
     if (h.empty() || parent.empty() || num_hex.empty() || ts_hex.empty()) {
-        return RT_ERR_PARSE;
+        return MARS_ERR_PARSE;
     }
 
     number = hex_to_u64_sat(num_hex);
@@ -590,7 +598,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
     collect_json_objects(json, tx_lo, tx_hi, &objs);
 
     if ((store_txs != 0U) && (tx_stmt == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     for (i = 0U; i < objs.size(); ++i) {
@@ -614,7 +622,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
 
         if (store_txs != 0U) {
             if (hash.empty()) {
-                return RT_ERR_PARSE;
+                return MARS_ERR_PARSE;
             }
             (void)sqlite3_bind_text(tx_stmt, 1, hash.c_str(), -1, SQLITE_TRANSIENT);
             (void)sqlite3_bind_int64(tx_stmt, 2, (sqlite3_int64)number);
@@ -629,7 +637,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
             bind_text_or_null(tx_stmt, 11, max_prio);
             (void)sqlite3_bind_int64(tx_stmt, 12, (sqlite3_int64)input_bytes);
             st = sqlite_step_done(tx_stmt);
-            if (st != RT_OK) {
+            if (st != MARS_OK) {
                 return st;
             }
         }
@@ -645,7 +653,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
     (void)sqlite3_bind_double(block_stmt, 8, base_fee_gwei);
     (void)sqlite3_bind_int64(block_stmt, 9, (sqlite3_int64)objs.size());
     st = sqlite_step_done(block_stmt);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
 
@@ -659,7 +667,7 @@ static rt_status_t store_eth_block(sqlite3_stmt *block_stmt, sqlite3_stmt *feat_
     return sqlite_step_done(feat_stmt);
 }
 
-static std::vector<std::string> split_csv(const char *s)
+static std::vector<std::string> split_series_list(const char *s)
 {
     std::vector<std::string> out;
     std::string cur;
@@ -704,7 +712,7 @@ static std::string fred_last_date(sqlite3 *db, const std::string &series)
     return out;
 }
 
-static rt_status_t store_fred_observations(sqlite3 *db, const std::string &series, const std::string &json)
+static mars_status_t store_fred_observations(sqlite3 *db, const std::string &series, const std::string &json)
 {
     sqlite3_stmt *obs = NULL;
     sqlite3_stmt *ser = NULL;
@@ -712,29 +720,29 @@ static rt_status_t store_fred_observations(sqlite3 *db, const std::string &serie
     size_t lo = 0U;
     size_t hi = 0U;
     size_t i;
-    rt_status_t st = RT_OK;
+    mars_status_t st = MARS_OK;
 
     if (json_array_range(json, "observations", &lo, &hi) == 0) {
-        return RT_ERR_PARSE;
+        return MARS_ERR_PARSE;
     }
     collect_json_objects(json, lo, hi, &objs);
 
     if (sqlite3_prepare_v2(db,
         "INSERT OR REPLACE INTO fred_observations(series_id,date,realtime_start,realtime_end,value_real,value_text) VALUES(?,?,?,?,?,?)",
         -1, &obs, NULL) != SQLITE_OK) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     if (sqlite3_prepare_v2(db,
         "INSERT OR REPLACE INTO fred_series(series_id,updated_at) VALUES(?,strftime('%s','now'))",
         -1, &ser, NULL) != SQLITE_OK) {
         sqlite3_finalize(obs);
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     (void)sqlite3_bind_text(ser, 1, series.c_str(), -1, SQLITE_TRANSIENT);
     st = sqlite_step_done(ser);
     sqlite3_finalize(ser);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         sqlite3_finalize(obs);
         return st;
     }
@@ -749,7 +757,7 @@ static rt_status_t store_fred_observations(sqlite3 *db, const std::string &serie
 
         if (date.empty() || rt0.empty() || rt1.empty() || val.empty()) {
             sqlite3_finalize(obs);
-            return RT_ERR_PARSE;
+            return MARS_ERR_PARSE;
         }
 
         (void)sqlite3_bind_text(obs, 1, series.c_str(), -1, SQLITE_TRANSIENT);
@@ -763,17 +771,17 @@ static rt_status_t store_fred_observations(sqlite3 *db, const std::string &serie
         }
         (void)sqlite3_bind_text(obs, 6, val.c_str(), -1, SQLITE_TRANSIENT);
         st = sqlite_step_done(obs);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             sqlite3_finalize(obs);
             return st;
         }
     }
 
     sqlite3_finalize(obs);
-    return RT_OK;
+    return MARS_OK;
 }
 
-static rt_status_t export_query(sqlite3 *db, const char *sql, FILE *fp)
+static mars_status_t export_query(sqlite3 *db, const char *sql, FILE *fp)
 {
     sqlite3_stmt *stmt = NULL;
     int rc;
@@ -781,11 +789,11 @@ static rt_status_t export_query(sqlite3 *db, const char *sql, FILE *fp)
     int i;
 
     if ((db == NULL) || (sql == NULL) || (fp == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     ncol = sqlite3_column_count(stmt);
@@ -812,18 +820,18 @@ static rt_status_t export_query(sqlite3 *db, const char *sql, FILE *fp)
     }
 
     sqlite3_finalize(stmt);
-    return (rc == SQLITE_DONE) ? RT_OK : RT_ERR_IO;
+    return (rc == SQLITE_DONE) ? MARS_OK : MARS_ERR_IO;
 }
 
 } /* namespace */
 
-extern "C" rt_status_t mars_db_init(const char *db_path)
+extern "C" mars_status_t mars_db_init(const char *db_path)
 {
     sqlite3 *db = NULL;
-    rt_status_t st;
+    mars_status_t st;
 
     st = db_open(db_path, &db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
     st = db_schema(db);
@@ -831,7 +839,7 @@ extern "C" rt_status_t mars_db_init(const char *db_path)
     return st;
 }
 
-extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
+extern "C" mars_status_t mars_eth_update(const char *db_path, const char *rpc_url,
                                         uint64_t from_block, uint64_t to_block,
                                         uint32_t store_txs)
 {
@@ -841,31 +849,31 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
     sqlite3_stmt *tx_stmt = NULL;
     uint64_t n;
     uint64_t latest = 0U;
-    rt_status_t st;
+    mars_status_t st;
 
     if ((db_path == NULL) || (rpc_url == NULL)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     st = db_open(db_path, &db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         curl_global_cleanup();
         return st;
     }
     st = db_schema(db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         sqlite3_close(db);
         curl_global_cleanup();
         return st;
     }
 
-    if (to_block == RT_ETH_LATEST) {
+    if (to_block == MARS_ETH_LATEST) {
         st = eth_latest_block(rpc_url, &latest);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             sqlite3_close(db);
             curl_global_cleanup();
             return st;
@@ -883,7 +891,7 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
     if (from_block > to_block) {
         sqlite3_close(db);
         curl_global_cleanup();
-        return RT_OK;
+        return MARS_OK;
     }
 
     if (sqlite3_prepare_v2(db,
@@ -891,7 +899,7 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
         -1, &block_stmt, NULL) != SQLITE_OK) {
         sqlite3_close(db);
         curl_global_cleanup();
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     if (sqlite3_prepare_v2(db,
         "INSERT OR REPLACE INTO eth_block_features(block_number,ts,tx_count,gas_used,base_fee_gwei,eth_value_total,input_bytes_total) VALUES(?,?,?,?,?,?,?)",
@@ -899,7 +907,7 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
         sqlite3_finalize(block_stmt);
         sqlite3_close(db);
         curl_global_cleanup();
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     if (store_txs != 0U) {
         if (sqlite3_prepare_v2(db,
@@ -909,12 +917,12 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
             sqlite3_finalize(block_stmt);
             sqlite3_close(db);
             curl_global_cleanup();
-            return RT_ERR_IO;
+            return MARS_ERR_IO;
         }
     }
 
     st = sql_exec(db, "BEGIN IMMEDIATE");
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         sqlite3_finalize(tx_stmt);
         sqlite3_finalize(feat_stmt);
         sqlite3_finalize(block_stmt);
@@ -926,20 +934,20 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
     for (n = from_block; n <= to_block; ++n) {
         std::string json;
         st = eth_rpc(rpc_url, "eth_getBlockByNumber", block_param(n), &json);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             break;
         }
         st = store_eth_block(block_stmt, feat_stmt, tx_stmt, json, store_txs);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             break;
         }
         st = set_state(db, "eth_last_block", n);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             break;
         }
         if (((n - from_block + 1U) % 100U) == 0U) {
             st = sql_exec(db, "COMMIT; BEGIN IMMEDIATE");
-            if (st != RT_OK) {
+            if (st != MARS_OK) {
                 break;
             }
             (void)fprintf(stderr, "eth-update: stored block %llu\n", (unsigned long long)n);
@@ -949,7 +957,7 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
         }
     }
 
-    if (st == RT_OK) {
+    if (st == MARS_OK) {
         st = sql_exec(db, "COMMIT");
     } else {
         (void)sql_exec(db, "ROLLBACK");
@@ -963,70 +971,70 @@ extern "C" rt_status_t mars_eth_update(const char *db_path, const char *rpc_url,
     return st;
 }
 
-extern "C" rt_status_t mars_eth_export(const char *db_path, const char *csv_path)
+extern "C" mars_status_t mars_eth_export(const char *db_path, const char *out_path)
 {
     sqlite3 *db = NULL;
     FILE *fp;
-    rt_status_t st;
+    mars_status_t st;
 
-    if ((db_path == NULL) || (csv_path == NULL)) {
-        return RT_ERR_ARG;
+    if ((db_path == NULL) || (out_path == NULL)) {
+        return MARS_ERR_ARG;
     }
 
     st = db_open(db_path, &db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
-    fp = fopen(csv_path, "w");
+    fp = fopen(out_path, "w");
     if (fp == NULL) {
         sqlite3_close(db);
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     st = export_query(db,
         "SELECT ts,block_number,tx_count,gas_used,base_fee_gwei,eth_value_total,input_bytes_total FROM eth_block_features ORDER BY block_number",
         fp);
     if (fclose(fp) != 0) {
-        st = RT_ERR_IO;
+        st = MARS_ERR_IO;
     }
     sqlite3_close(db);
     return st;
 }
 
-extern "C" rt_status_t mars_fred_update(const char *db_path, const char *series_csv,
+extern "C" mars_status_t mars_fred_update(const char *db_path, const char *series_list,
                                          const char *api_key)
 {
     sqlite3 *db = NULL;
     std::vector<std::string> series;
     size_t i;
-    rt_status_t st;
+    mars_status_t st;
 
-    if ((db_path == NULL) || (series_csv == NULL) || (api_key == NULL)) {
-        return RT_ERR_ARG;
+    if ((db_path == NULL) || (series_list == NULL) || (api_key == NULL)) {
+        return MARS_ERR_ARG;
     }
 
-    series = split_csv(series_csv);
+    series = split_series_list(series_list);
     if (series.empty()) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     if (curl_global_init(CURL_GLOBAL_DEFAULT) != CURLE_OK) {
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
 
     st = db_open(db_path, &db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         curl_global_cleanup();
         return st;
     }
     st = db_schema(db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         sqlite3_close(db);
         curl_global_cleanup();
         return st;
     }
 
     st = sql_exec(db, "BEGIN IMMEDIATE");
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         sqlite3_close(db);
         curl_global_cleanup();
         return st;
@@ -1042,17 +1050,17 @@ extern "C" rt_status_t mars_fred_update(const char *db_path, const char *series_
             url += "&observation_start=" + last;
         }
         st = http_get(url, &json);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             break;
         }
         st = store_fred_observations(db, series[i], json);
-        if (st != RT_OK) {
+        if (st != MARS_OK) {
             break;
         }
         (void)fprintf(stderr, "fred-update: stored %s\n", series[i].c_str());
     }
 
-    if (st == RT_OK) {
+    if (st == MARS_OK) {
         st = sql_exec(db, "COMMIT");
     } else {
         (void)sql_exec(db, "ROLLBACK");
@@ -1062,30 +1070,30 @@ extern "C" rt_status_t mars_fred_update(const char *db_path, const char *series_
     return st;
 }
 
-extern "C" rt_status_t mars_fred_export(const char *db_path, const char *csv_path)
+extern "C" mars_status_t mars_fred_export(const char *db_path, const char *out_path)
 {
     sqlite3 *db = NULL;
     FILE *fp;
-    rt_status_t st;
+    mars_status_t st;
 
-    if ((db_path == NULL) || (csv_path == NULL)) {
-        return RT_ERR_ARG;
+    if ((db_path == NULL) || (out_path == NULL)) {
+        return MARS_ERR_ARG;
     }
 
     st = db_open(db_path, &db);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
-    fp = fopen(csv_path, "w");
+    fp = fopen(out_path, "w");
     if (fp == NULL) {
         sqlite3_close(db);
-        return RT_ERR_IO;
+        return MARS_ERR_IO;
     }
     st = export_query(db,
         "SELECT series_id,date,realtime_start,realtime_end,value_text,value_real FROM fred_observations ORDER BY series_id,date,realtime_start,realtime_end",
         fp);
     if (fclose(fp) != 0) {
-        st = RT_ERR_IO;
+        st = MARS_ERR_IO;
     }
     sqlite3_close(db);
     return st;

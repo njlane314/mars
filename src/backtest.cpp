@@ -22,7 +22,7 @@ static double dmin(double a, double b)
 }
 
 
-static double prediction_to_pos(const rt_model_t *m, const rt_row_t *r, double pred_ticks)
+static double prediction_to_pos(const mars_model_t *m, const mars_row_t *r, double pred_ticks)
 {
     const double threshold = m->edge_cost_ticks + m->buffer_ticks;
 
@@ -40,15 +40,15 @@ static double prediction_to_pos(const rt_model_t *m, const rt_row_t *r, double p
 }
 
 
-rt_bt_stats_t Backtester::evaluate(
-    const rt_model_t *m,
-    const rt_data_t *d,
+mars_bt_stats_t Backtester::evaluate(
+    const mars_model_t *m,
+    const mars_data_t *d,
     size_t start,
     size_t end,
     const double *pred,
     const char *trades_path)
 {
-    rt_bt_stats_t s;
+    mars_bt_stats_t s;
     FILE *fp = NULL;
     double pos = 0.0;
     double eq = 0.0;
@@ -74,7 +74,7 @@ rt_bt_stats_t Backtester::evaluate(
         const double bar = pos * ((d->row[i].mid - d->row[i - 1U].mid) / m->tick_size);
         const double net = bar - cost;
 
-        if (turnover > RT_EPS) {
+        if (turnover > MARS_EPS) {
             s.trades += 1.0;
             s.turnover += turnover;
         }
@@ -112,7 +112,7 @@ rt_bt_stats_t Backtester::evaluate(
         const double var = dmax(0.0, (ss / (double)n) - (mean * mean));
         s.mean_pnl_ticks = mean;
         s.sd_pnl_ticks = sqrt(var);
-        s.sharpe_bar = mean / (s.sd_pnl_ticks + RT_EPS);
+        s.sharpe_bar = mean / (s.sd_pnl_ticks + MARS_EPS);
     }
 
     return s;

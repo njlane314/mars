@@ -10,55 +10,63 @@ endif
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 INSTALL ?= install
+SRC = src
+BUILDDIR ?= build
+OBJDIR = $(BUILDDIR)/obj
+PROG = $(BUILDDIR)/mars
 
-OBJS = mars.o mars_core.o csv.o features.o scale.o hmm.o alpha.o backtest.o model_store.o report.o db.o
+OBJS = $(OBJDIR)/main.o $(OBJDIR)/core.o $(OBJDIR)/data.o $(OBJDIR)/features.o $(OBJDIR)/scale.o $(OBJDIR)/hmm.o $(OBJDIR)/alpha.o $(OBJDIR)/backtest.o $(OBJDIR)/store.o $(OBJDIR)/report.o $(OBJDIR)/db.o
 
-all: mars
+all: $(PROG)
 
-mars: $(OBJS)
-	$(CXX) -o mars $(OBJS) $(LDFLAGS)
+$(PROG): $(OBJS) | $(BUILDDIR)
+	$(CXX) -o $(PROG) $(OBJS) $(LDFLAGS)
 
-mars.o: mars.c mars_api.h
-	$(CC) $(CFLAGS) -c mars.c
+$(BUILDDIR) $(OBJDIR):
+	mkdir -p "$@"
 
-mars_core.o: mars_core.cpp mars_api.h alpha.hpp backtest.hpp csv.hpp features.hpp hmm.hpp model_store.hpp report.hpp
-	$(CXX) $(CXXFLAGS) -c mars_core.cpp
+$(OBJDIR)/main.o: $(SRC)/main.c $(SRC)/api.h | $(OBJDIR)
+	$(CC) $(CFLAGS) -c $(SRC)/main.c -o $(OBJDIR)/main.o
 
-csv.o: csv.cpp csv.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c csv.cpp
+$(OBJDIR)/core.o: $(SRC)/core.cpp $(SRC)/api.h $(SRC)/alpha.hpp $(SRC)/backtest.hpp $(SRC)/data.hpp $(SRC)/features.hpp $(SRC)/hmm.hpp $(SRC)/store.hpp $(SRC)/report.hpp | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/core.cpp -o $(OBJDIR)/core.o
 
-features.o: features.cpp features.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c features.cpp
+$(OBJDIR)/data.o: $(SRC)/data.cpp $(SRC)/data.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/data.cpp -o $(OBJDIR)/data.o
 
-scale.o: scale.cpp scale.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c scale.cpp
+$(OBJDIR)/features.o: $(SRC)/features.cpp $(SRC)/features.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/features.cpp -o $(OBJDIR)/features.o
 
-hmm.o: hmm.cpp hmm.hpp scale.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c hmm.cpp
+$(OBJDIR)/scale.o: $(SRC)/scale.cpp $(SRC)/scale.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/scale.cpp -o $(OBJDIR)/scale.o
 
-alpha.o: alpha.cpp alpha.hpp backtest.hpp hmm.hpp scale.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c alpha.cpp
+$(OBJDIR)/hmm.o: $(SRC)/hmm.cpp $(SRC)/hmm.hpp $(SRC)/scale.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/hmm.cpp -o $(OBJDIR)/hmm.o
 
-backtest.o: backtest.cpp backtest.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c backtest.cpp
+$(OBJDIR)/alpha.o: $(SRC)/alpha.cpp $(SRC)/alpha.hpp $(SRC)/backtest.hpp $(SRC)/hmm.hpp $(SRC)/scale.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/alpha.cpp -o $(OBJDIR)/alpha.o
 
-model_store.o: model_store.cpp model_store.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c model_store.cpp
+$(OBJDIR)/backtest.o: $(SRC)/backtest.cpp $(SRC)/backtest.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/backtest.cpp -o $(OBJDIR)/backtest.o
 
-report.o: report.cpp report.hpp model_store.hpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c report.cpp
+$(OBJDIR)/store.o: $(SRC)/store.cpp $(SRC)/store.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/store.cpp -o $(OBJDIR)/store.o
 
-db.o: db.cpp mars_api.h
-	$(CXX) $(CXXFLAGS) -c db.cpp
+$(OBJDIR)/report.o: $(SRC)/report.cpp $(SRC)/report.hpp $(SRC)/store.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/report.cpp -o $(OBJDIR)/report.o
 
-install: mars
+$(OBJDIR)/db.o: $(SRC)/db.cpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/db.cpp -o $(OBJDIR)/db.o
+
+install: $(PROG)
 	$(INSTALL) -d "$(DESTDIR)$(BINDIR)"
-	$(INSTALL) -m 0755 mars "$(DESTDIR)$(BINDIR)/mars"
+	$(INSTALL) -m 0755 $(PROG) "$(DESTDIR)$(BINDIR)/mars"
 
 uninstall:
 	rm -f "$(DESTDIR)$(BINDIR)/mars"
 
 clean:
-	rm -f mars $(OBJS) *.model *.mars trades.csv
+	rm -rf $(BUILDDIR)
+	rm -f mars *.o
 
 .PHONY: all clean install uninstall

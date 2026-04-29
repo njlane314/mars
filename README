@@ -7,13 +7,13 @@ SYNOPSIS
      make
      make install
 
-     mars fit input.csv model.mars
      mars inspect model.mars
-     mars replay input.csv model.mars trades.csv
+     mars fit-db market.db model.mars [table]
+     mars replay-db market.db model.mars trades.csv [table]
 
      mars db-init market.db
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
-     mars eth-export market.db eth_blocks.csv
+     mars eth-export market.db ethblocks.csv
      mars fred-update market.db SERIES[,SERIES...]
      mars fred-export market.db fred.csv
 
@@ -24,62 +24,54 @@ DESCRIPTION
      The intended first instrument is CME ES/MES 1-second top-of-book bars.
 
 FILES
-     mars.c
+     src/main.c
           Plain C command entrypoint and argument dispatch.
 
-     mars_api.h
+     src/api.h
           C-compatible boundary, status codes, constants, and shared POD
           model/data types.
 
-     mars_core.cpp
+     src/core.cpp
           C++ orchestration over focused module classes.
 
-     csv.cpp, csv.hpp
-          CsvData: load and release market data.
+     src/data.cpp, src/data.hpp
+          Data: load market bars directly from SQLite.
 
-     features.cpp, features.hpp
+     src/features.cpp, src/features.hpp
           FeatureBuilder: construct model features from market rows.
 
-     scale.cpp, scale.hpp
+     src/scale.cpp, src/scale.hpp
           ScalerOps: fit/apply scalers and build feature matrices.
 
-     hmm.cpp, hmm.hpp
+     src/hmm.cpp, src/hmm.hpp
           HmmModel: fit and filter latent states.
 
-     alpha.cpp, alpha.hpp
+     src/alpha.cpp, src/alpha.hpp
           AlphaModel: train and apply the sparse alpha model.
 
-     backtest.cpp, backtest.hpp
+     src/backtest.cpp, src/backtest.hpp
           Backtester: replay predictions into PnL and trade output.
 
-     model_store.cpp, model_store.hpp
+     src/store.cpp, src/store.hpp
           ModelStore: default config, validation, save, and load.
 
-     report.cpp, report.hpp
+     src/report.cpp, src/report.hpp
           Reporter: stats and model inspection output.
 
-     db.cpp
+     src/db.cpp
           SQLite-backed Ethereum and FRED ingestion/export commands.
-
-     README_DB
-          DB ingestion usage notes and schema overview.
 
      Makefile
           Builds and installs mars. DB ingestion links against libcurl and
           sqlite3.
 
 INPUT
-     The input CSV schema is:
-
-          ts,bid,ask,bid_sz,ask_sz,volume
-          1700000000,5000.00,5000.25,115,103,90
-
-     DB ingestion commands write local SQLite data and export CSV feature
-     panels. See README_DB for Ethereum and FRED examples.
+     DB commands write local SQLite data. Training reads market bars directly
+     from SQLite through fit-db and replay-db.
 
 COMMANDS
      make
-          Build the mars binary.
+          Build the local binary at build/mars.
 
      make install
           Install mars to PREFIX/bin. PREFIX defaults to /usr/local.
@@ -88,14 +80,17 @@ COMMANDS
           Install mars to $HOME/.local/bin for a user-local setup.
           Ensure $HOME/.local/bin is in PATH to run mars by name.
 
-     mars fit es_1s.csv es.mars
-          Fit a model.
-
      mars inspect es.mars
           Inspect learned latent states and sparse alpha coefficients.
 
-     mars replay es_1s.csv es.mars trades.csv
-          Replay or backtest a fitted model.
+     mars fit-db market.db es.mars
+          Fit a model directly from market_bars.
+
+     mars fit-db market.db es.mars my_bars
+          Fit directly from another table or view with the market-bar schema.
+
+     mars replay-db market.db es.mars trades.csv
+          Replay a fitted model directly from market_bars.
 
      mars db-init market.db
           Initialize the local SQLite learning database.
@@ -103,7 +98,7 @@ COMMANDS
      mars eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]
           Fetch Ethereum block and optional transaction data using ETH_RPC_URL.
 
-     mars eth-export market.db eth_blocks.csv
+     mars eth-export market.db ethblocks.csv
           Export Ethereum block-level learning features.
 
      mars fred-update market.db SERIES[,SERIES...]
@@ -111,6 +106,58 @@ COMMANDS
 
      mars fred-export market.db fred.csv
           Export stored FRED observations.
+
+DATABASE
+     The local learning database is SQLite. Initialize it with:
+
+          mars db-init market.db
+
+     Market bars
+          The model trains on top-of-book market bars shaped as:
+
+               ts,bid,ask,bid_sz,ask_sz,volume
+
+          The default SQLite table is market_bars. Populate that table directly
+          with SQLite, or create a view with the same columns, then fit and
+          replay directly from SQLite:
+
+               mars fit-db market.db es.mars
+               mars replay-db market.db es.mars trades.csv
+
+          Any table or view with the same six columns can be used:
+
+               mars fit-db market.db es.mars my_market_view
+
+     Ethereum chain data
+          mars talks to an Ethereum execution JSON-RPC endpoint and calls
+          eth_getBlockByNumber with full transaction objects. Run your own node
+          if possible; hosted RPC endpoints work for small backfills but are
+          usually rate-limited for large historical ingestion.
+
+               export ETH_RPC_URL=http://127.0.0.1:8545
+               mars eth-update market.db 19000000 19001000
+               mars eth-update market.db 0 latest --blocks-only
+
+          Ethereum tables:
+
+               eth_blocks
+               eth_txs
+               eth_block_features
+
+     FRED data
+          FRED observations are fetched with FRED_API_KEY:
+
+               export FRED_API_KEY=...
+               mars fred-update market.db DGS2,DGS10,T10Y2Y,VIXCLS,DTWEXBGS,WALCL
+
+          FRED tables:
+
+               fred_series
+               fred_observations
+
+     Exports
+          eth-export and fred-export are for inspection and interoperability.
+          Export files are no longer part of the training path.
 
 DESIGN
      Instrument choice

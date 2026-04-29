@@ -1,5 +1,7 @@
 mars
-eth-node/data/
+build/
+exports/
+node/data/
 .secrets/
 .env
 .env.*

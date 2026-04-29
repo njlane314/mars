@@ -2,10 +2,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "model_store.hpp"
+#include "store.hpp"
 #include "report.hpp"
 
-void Reporter::printStats(const char *name, const rt_bt_stats_t *s)
+void Reporter::printStats(const char *name, const mars_bt_stats_t *s)
 {
     if ((name == NULL) || (s == NULL)) {
         return;
@@ -26,7 +26,7 @@ void Reporter::printStats(const char *name, const rt_bt_stats_t *s)
 
 static void print_reg_feature_name(uint32_t j)
 {
-    static const char *names[RT_MAX_REG_FEATURES] = {
+    static const char *names[MARS_MAX_REG_FEATURES] = {
         "ret1_ticks",
         "ret5_ticks",
         "abs_ret5_ticks",
@@ -37,7 +37,7 @@ static void print_reg_feature_name(uint32_t j)
         "ofi5_norm"
     };
 
-    if (j < RT_MAX_REG_FEATURES) {
+    if (j < MARS_MAX_REG_FEATURES) {
         (void)printf("%s", names[j]);
     } else {
         (void)printf("feature_%u", j);
@@ -45,16 +45,16 @@ static void print_reg_feature_name(uint32_t j)
 }
 
 
-rt_status_t Reporter::inspectModel(const char *model_path)
+mars_status_t Reporter::inspectModel(const char *model_path)
 {
-    rt_model_t m;
+    mars_model_t m;
     uint32_t i;
     uint32_t j;
-    rt_status_t st;
+    mars_status_t st;
 
     memset(&m, 0, sizeof(m));
     st = ModelStore::load(model_path, &m);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         return st;
     }
 
@@ -91,6 +91,6 @@ rt_status_t Reporter::inspectModel(const char *model_path)
         }
     }
 
-    return RT_OK;
+    return MARS_OK;
 }
 

@@ -1,0 +1,45 @@
+MARS ETHEREUM NODE
+==================
+
+This directory keeps the local Ethereum node setup inside the MARS repo.
+The scripts are tracked. The node database is not.
+
+Default data directory:
+
+    node/data/mainnet
+
+Initialize:
+
+    node/bin/init-mainnet.sh
+
+Then run these in two terminals:
+
+    node/bin/start-geth-mainnet.sh
+    node/bin/start-lighthouse-mainnet.sh
+
+MARS reads Geth over the local JSON-RPC endpoint:
+
+    export ETH_RPC_URL=http://127.0.0.1:8545
+
+Sanity check:
+
+    curl -s "$ETH_RPC_URL" \
+      -H 'Content-Type: application/json' \
+      -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
+
+If the repo disk is too small, keep the command surface here but point the data
+directory at a large external SSD:
+
+    node/bin/init-mainnet.sh /Volumes/ETHNODE/mars-eth
+    node/bin/start-geth-mainnet.sh /Volumes/ETHNODE/mars-eth
+    node/bin/start-lighthouse-mainnet.sh /Volumes/ETHNODE/mars-eth
+
+Ethereum mainnet requires both clients:
+
+    geth        execution client and JSON-RPC endpoint for MARS
+    lighthouse consensus client that drives post-merge sync
+
+The initializer refuses disks with less than 700 GiB free by default. Override
+only when you know the target disk can support the sync:
+
+    MARS_ETH_MIN_FREE_GIB=500 node/bin/init-mainnet.sh

@@ -1,8 +1,8 @@
 /*
- * mars.c -- UNIX command entrypoint for mars.
+ * main.c -- UNIX command entrypoint for mars.
  *
  * Keep this file plain C and boring. The implementation lives behind the
- * C-compatible interface in mars_api.h.
+ * C-compatible interface in api.h.
  */
 
 #include <errno.h>
@@ -10,24 +10,24 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "mars_api.h"
+#include "api.h"
 
 static void usage(const char *argv0)
 {
     (void)fprintf(stderr,
                   "usage:\n"
-                  "  %s fit    input.csv model.mars\n"
-                  "  %s replay input.csv model.mars trades.csv\n"
+                  "  %s fit-db market.db model.mars [table]\n"
+                  "  %s replay-db market.db model.mars trades.csv [table]\n"
                   "  %s inspect model.mars\n\n"
-                  "input csv schema:\n"
-                  "  ts,bid,ask,bid_sz,ask_sz,volume\n\n"
+                  "default db table: market_bars\n"
                   "defaults: ES/MES-like 1-second bars, horizon=%u bars, tick=%.8f\n",
-                  argv0, argv0, argv0, RT_DEFAULT_HORIZON, RT_DEFAULT_TICK_SIZE);
+                  argv0, argv0, argv0,
+                  MARS_DEFAULT_HORIZON, MARS_DEFAULT_TICK_SIZE);
     (void)fprintf(stderr,
                   "\ndb commands:\n"
                   "  %s db-init market.db\n"
                   "  %s eth-update market.db FROM_BLOCK TO_BLOCK [--blocks-only]\n"
-                  "  %s eth-export market.db eth_blocks.csv\n"
+                  "  %s eth-export market.db ethblocks.csv\n"
                   "  %s fred-update market.db SERIES[,SERIES...]\n"
                   "  %s fred-export market.db fred.csv\n\n"
                   "env:\n"
@@ -45,7 +45,7 @@ static int parse_block_arg(const char *s, uint64_t *out)
         return 0;
     }
     if (strcmp(s, "latest") == 0) {
-        *out = RT_ETH_LATEST;
+        *out = MARS_ETH_LATEST;
         return 1;
     }
 
@@ -61,25 +61,25 @@ static int parse_block_arg(const char *s, uint64_t *out)
 
 int main(int argc, char **argv)
 {
-    rt_status_t st;
+    mars_status_t st;
 
     if (argc < 2) {
         usage(argv[0]);
         return EXIT_FAILURE;
     }
 
-    if (strcmp(argv[1], "fit") == 0) {
-        if (argc != 4) {
+    if (strcmp(argv[1], "fit-db") == 0) {
+        if ((argc != 4) && (argc != 5)) {
             usage(argv[0]);
             return EXIT_FAILURE;
         }
-        st = mars_fit(argv[2], argv[3]);
-    } else if (strcmp(argv[1], "replay") == 0) {
-        if (argc != 5) {
+        st = mars_fit_db(argv[2], (argc == 5) ? argv[4] : NULL, argv[3]);
+    } else if (strcmp(argv[1], "replay-db") == 0) {
+        if ((argc != 5) && (argc != 6)) {
             usage(argv[0]);
             return EXIT_FAILURE;
         }
-        st = mars_replay(argv[2], argv[3], argv[4]);
+        st = mars_replay_db(argv[2], (argc == 6) ? argv[5] : NULL, argv[3], argv[4]);
     } else if (strcmp(argv[1], "inspect") == 0) {
         if (argc != 3) {
             usage(argv[0]);
@@ -150,7 +150,7 @@ int main(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         (void)fprintf(stderr, "mars: error %d\n", (int)st);
         return EXIT_FAILURE;
     }

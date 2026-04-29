@@ -56,20 +56,20 @@ uint32_t AlphaModel::augDim(uint32_t base_dim, uint32_t k)
 
 
 static void build_aug_raw(
-    const rt_row_t *r,
-    const rt_scaler_t *base_scaler,
+    const mars_row_t *r,
+    const mars_scaler_t *base_scaler,
     const double *pi,
     uint32_t k,
     double *aug)
 {
-    double base[RT_MAX_BASE_FEATURES];
+    double base[MARS_MAX_BASE_FEATURES];
     uint32_t j;
     uint32_t q;
     uint32_t p = 0U;
 
     ScalerOps::applyVec(base_scaler, r->base, base);
 
-    for (j = 0U; j < RT_MAX_BASE_FEATURES; ++j) {
+    for (j = 0U; j < MARS_MAX_BASE_FEATURES; ++j) {
         aug[p] = base[j];
         ++p;
     }
@@ -78,7 +78,7 @@ static void build_aug_raw(
         ++p;
     }
     for (q = 0U; q < k; ++q) {
-        for (j = 0U; j < RT_MAX_BASE_FEATURES; ++j) {
+        for (j = 0U; j < MARS_MAX_BASE_FEATURES; ++j) {
             aug[p] = pi[q] * base[j];
             ++p;
         }
@@ -86,32 +86,32 @@ static void build_aug_raw(
 }
 
 
-static rt_status_t fit_base_scaler(rt_model_t *m, const rt_data_t *d, size_t start, size_t end)
+static mars_status_t fit_base_scaler(mars_model_t *m, const mars_data_t *d, size_t start, size_t end)
 {
     double *raw = NULL;
     size_t n;
-    rt_status_t st;
+    mars_status_t st;
 
     if ((m == NULL) || (d == NULL) || (end <= start)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     n = end - start;
-    raw = (double *)calloc(n * RT_MAX_BASE_FEATURES, sizeof(double));
+    raw = (double *)calloc(n * MARS_MAX_BASE_FEATURES, sizeof(double));
     if (raw == NULL) {
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     ScalerOps::rowsToMatrixBase(d, start, end, raw);
-    st = ScalerOps::fit(&m->base_scaler, raw, n, RT_MAX_BASE_FEATURES);
+    st = ScalerOps::fit(&m->base_scaler, raw, n, MARS_MAX_BASE_FEATURES);
     free(raw);
     return st;
 }
 
 
-static rt_status_t build_aug_matrix(
-    const rt_model_t *m,
-    const rt_data_t *d,
+static mars_status_t build_aug_matrix(
+    const mars_model_t *m,
+    const mars_data_t *d,
     size_t start,
     size_t end,
     const double *pi,
@@ -121,7 +121,7 @@ static rt_status_t build_aug_matrix(
     uint32_t augd;
 
     if ((m == NULL) || (d == NULL) || (pi == NULL) || (x_aug_raw == NULL) || (end <= start)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     augd = m->aug_dim;
@@ -130,28 +130,28 @@ static rt_status_t build_aug_matrix(
                          &x_aug_raw[(i - start) * augd]);
     }
 
-    return RT_OK;
+    return MARS_OK;
 }
 
 
-static void apply_aug_scaler_matrix(const rt_scaler_t *s, double *x, size_t n)
+static void apply_aug_scaler_matrix(const mars_scaler_t *s, double *x, size_t n)
 {
     size_t i;
     uint32_t j;
 
     for (i = 0U; i < n; ++i) {
         for (j = 0U; j < s->d; ++j) {
-            double z = (x[(i * s->d) + j] - s->mean[j]) / (s->sd[j] + RT_EPS);
+            double z = (x[(i * s->d) + j] - s->mean[j]) / (s->sd[j] + MARS_EPS);
             x[(i * s->d) + j] = clip(z, -12.0, 12.0);
         }
     }
 }
 
 
-static double predict_row(const rt_model_t *m, const rt_row_t *r, const double *pi)
+static double predict_row(const mars_model_t *m, const mars_row_t *r, const double *pi)
 {
-    double aug_raw[RT_MAX_AUG_FEATURES];
-    double aug[RT_MAX_AUG_FEATURES];
+    double aug_raw[MARS_MAX_AUG_FEATURES];
+    double aug[MARS_MAX_AUG_FEATURES];
     double y = m->alpha_intercept;
     uint32_t j;
 
@@ -165,7 +165,7 @@ static double predict_row(const rt_model_t *m, const rt_row_t *r, const double *
 }
 
 
-static rt_status_t enet_fit(
+static mars_status_t enet_fit(
     const double *x,
     const double *y,
     size_t n,
@@ -182,13 +182,13 @@ static rt_status_t enet_fit(
     uint32_t iter;
 
     if ((x == NULL) || (y == NULL) || (intercept == NULL) || (beta == NULL) ||
-        (n == 0U) || (d == 0U) || (d > RT_MAX_AUG_FEATURES)) {
-        return RT_ERR_ARG;
+        (n == 0U) || (d == 0U) || (d > MARS_MAX_AUG_FEATURES)) {
+        return MARS_ERR_ARG;
     }
 
     res = (double *)calloc(n, sizeof(double));
     if (res == NULL) {
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     for (i = 0U; i < n; ++i) {
@@ -204,7 +204,7 @@ static rt_status_t enet_fit(
         res[i] = y[i] - mean_y;
     }
 
-    for (iter = 0U; iter < RT_MAX_CD_ITERS; ++iter) {
+    for (iter = 0U; iter < MARS_MAX_CD_ITERS; ++iter) {
         double max_delta = 0.0;
         for (j = 0U; j < d; ++j) {
             double rho = 0.0;
@@ -222,7 +222,7 @@ static rt_status_t enet_fit(
             z /= (double)n;
 
             newb = soft_threshold(rho, lambda * l1_ratio) /
-                   (z + lambda * (1.0 - l1_ratio) + RT_EPS);
+                   (z + lambda * (1.0 - l1_ratio) + MARS_EPS);
 
             for (i = 0U; i < n; ++i) {
                 const double xij = x[(i * d) + j];
@@ -239,32 +239,32 @@ static rt_status_t enet_fit(
     }
 
     free(res);
-    return RT_OK;
+    return MARS_OK;
 }
 
 
-rt_status_t AlphaModel::predictRange(
-    const rt_model_t *m,
-    const rt_data_t *d,
+mars_status_t AlphaModel::predictRange(
+    const mars_model_t *m,
+    const mars_data_t *d,
     size_t start,
     size_t end,
     double *pred)
 {
     double *pi = NULL;
     size_t i;
-    rt_status_t st;
+    mars_status_t st;
 
     if ((m == NULL) || (d == NULL) || (pred == NULL) || (end <= start)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     pi = (double *)calloc((end - start) * m->k, sizeof(double));
     if (pi == NULL) {
-        return RT_ERR_MEM;
+        return MARS_ERR_MEM;
     }
 
     st = HmmModel::filterRange(&m->hmm, d, start, end, pi);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         free(pi);
         return st;
     }
@@ -273,24 +273,24 @@ rt_status_t AlphaModel::predictRange(
         pred[i - start] = predict_row(m, &d->row[i], &pi[(i - start) * m->k]);
         if (!is_finite(pred[i - start])) {
             free(pi);
-            return RT_ERR_NUM;
+            return MARS_ERR_NUM;
         }
     }
 
     free(pi);
-    return RT_OK;
+    return MARS_OK;
 }
 
 
-rt_status_t AlphaModel::trainEval(
-    rt_model_t *m,
-    const rt_data_t *d,
+mars_status_t AlphaModel::trainEval(
+    mars_model_t *m,
+    const mars_data_t *d,
     size_t train_start,
     size_t train_end,
     size_t val_start,
     size_t val_end,
     double lambda,
-    rt_bt_stats_t *stats_out)
+    mars_bt_stats_t *stats_out)
 {
     double *pi_train = NULL;
     double *pi_val = NULL;
@@ -298,14 +298,14 @@ rt_status_t AlphaModel::trainEval(
     double *x_val = NULL;
     double *y_train = NULL;
     double *pred = NULL;
-    rt_status_t st = RT_OK;
+    mars_status_t st = MARS_OK;
     size_t n_train;
     size_t n_val;
     size_t i;
 
     if ((m == NULL) || (d == NULL) || (stats_out == NULL) ||
         (train_end <= train_start) || (val_end <= val_start)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     n_train = train_end - train_start;
@@ -319,30 +319,30 @@ rt_status_t AlphaModel::trainEval(
     pred = (double *)calloc(n_val, sizeof(double));
     if ((pi_train == NULL) || (pi_val == NULL) || (x_train == NULL) ||
         (x_val == NULL) || (y_train == NULL) || (pred == NULL)) {
-        st = RT_ERR_MEM;
+        st = MARS_ERR_MEM;
         goto done;
     }
 
     st = fit_base_scaler(m, d, train_start, train_end);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
 
     st = HmmModel::filterRange(&m->hmm, d, train_start, train_end, pi_train);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
     st = HmmModel::filterRange(&m->hmm, d, val_start, val_end, pi_val);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
 
     st = build_aug_matrix(m, d, train_start, train_end, pi_train, x_train);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
     st = ScalerOps::fit(&m->aug_scaler, x_train, n_train, m->aug_dim);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
     apply_aug_scaler_matrix(&m->aug_scaler, x_train, n_train);
@@ -352,12 +352,12 @@ rt_status_t AlphaModel::trainEval(
     }
 
     st = enet_fit(x_train, y_train, n_train, m->aug_dim, lambda, 0.80, &m->alpha_intercept, m->beta);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
 
     st = build_aug_matrix(m, d, val_start, val_end, pi_val, x_val);
-    if (st != RT_OK) {
+    if (st != MARS_OK) {
         goto done;
     }
     apply_aug_scaler_matrix(&m->aug_scaler, x_val, n_val);
@@ -384,13 +384,13 @@ done:
 }
 
 
-rt_status_t AlphaModel::trainFinal(
-    rt_model_t *m,
-    const rt_data_t *d,
+mars_status_t AlphaModel::trainFinal(
+    mars_model_t *m,
+    const mars_data_t *d,
     size_t train_start,
     size_t train_end,
     double lambda)
 {
-    rt_bt_stats_t dummy;
+    mars_bt_stats_t dummy;
     return AlphaModel::trainEval(m, d, train_start, train_end, train_start, train_end, lambda, &dummy);
 }

@@ -85,17 +85,17 @@ static double time_cos(uint64_t ts)
 }
 
 
-rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
+mars_status_t FeatureBuilder::make(mars_data_t *d, const mars_config_t *cfg)
 {
     double *ret1 = NULL;
     double *volume_log = NULL;
     double *depth_log = NULL;
     double *ofi1 = NULL;
     size_t t;
-    rt_status_t st = RT_OK;
+    mars_status_t st = MARS_OK;
 
     if ((d == NULL) || (d->row == NULL) || (cfg == NULL) || (cfg->tick_size <= 0.0)) {
-        return RT_ERR_ARG;
+        return MARS_ERR_ARG;
     }
 
     ret1 = (double *)calloc(d->n, sizeof(double));
@@ -103,13 +103,13 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
     depth_log = (double *)calloc(d->n, sizeof(double));
     ofi1 = (double *)calloc(d->n, sizeof(double));
     if ((ret1 == NULL) || (volume_log == NULL) || (depth_log == NULL) || (ofi1 == NULL)) {
-        st = RT_ERR_MEM;
+        st = MARS_ERR_MEM;
         goto done;
     }
 
     for (t = 0U; t < d->n; ++t) {
-        rt_row_t *r = &d->row[t];
-        const double denom = r->bid_sz + r->ask_sz + RT_EPS;
+        mars_row_t *r = &d->row[t];
+        const double denom = r->bid_sz + r->ask_sz + MARS_EPS;
         const double micro = ((r->ask * r->bid_sz) + (r->bid * r->ask_sz)) / denom;
 
         r->mid = 0.5 * (r->bid + r->ask);
@@ -123,7 +123,7 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
             r->ret1_ticks = 0.0;
             ofi1[t] = 0.0;
         } else {
-            const rt_row_t *p = &d->row[t - 1U];
+            const mars_row_t *p = &d->row[t - 1U];
             double e_bid;
             double e_ask;
 
@@ -145,7 +145,7 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
                 e_ask += p->ask_sz;
             }
 
-            ofi1[t] = (e_bid + e_ask) / (0.5 * (r->depth + p->depth) + RT_EPS);
+            ofi1[t] = (e_bid + e_ask) / (0.5 * (r->depth + p->depth) + MARS_EPS);
         }
 
         ret1[t] = r->ret1_ticks;
@@ -154,7 +154,7 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
     }
 
     for (t = 0U; t < d->n; ++t) {
-        rt_row_t *r = &d->row[t];
+        mars_row_t *r = &d->row[t];
         const double ret5 = (t >= 5U) ? ((r->mid - d->row[t - 5U].mid) / cfg->tick_size) : 0.0;
         const double ret10 = (t >= 10U) ? ((r->mid - d->row[t - 10U].mid) / cfg->tick_size) : 0.0;
         const double ret20 = (t >= 20U) ? ((r->mid - d->row[t - 20U].mid) / cfg->tick_size) : 0.0;
@@ -166,8 +166,8 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
         const double vol_sd = rolling_std(volume_log, d->n, t, 120U);
         const double dep_mu = rolling_mean(depth_log, d->n, t, 120U);
         const double dep_sd = rolling_std(depth_log, d->n, t, 120U);
-        const double vol_z = (volume_log[t] - vol_mu) / (vol_sd + RT_EPS);
-        const double dep_z = (depth_log[t] - dep_mu) / (dep_sd + RT_EPS);
+        const double vol_z = (volume_log[t] - vol_mu) / (vol_sd + MARS_EPS);
+        const double dep_z = (depth_log[t] - dep_mu) / (dep_sd + MARS_EPS);
         double vwap20 = r->mid;
         double num = 0.0;
         double den = 0.0;
@@ -178,7 +178,7 @@ rt_status_t FeatureBuilder::make(rt_data_t *d, const rt_config_t *cfg)
             num += d->row[j].mid * d->row[j].volume;
             den += d->row[j].volume;
         }
-        if (den > RT_EPS) {
+        if (den > MARS_EPS) {
             vwap20 = num / den;
         }
 

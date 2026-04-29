@@ -21,13 +21,13 @@ static double clip(double x, double lo, double hi)
 }
 
 
-rt_status_t ScalerOps::fit(rt_scaler_t *s, const double *x, size_t n, uint32_t d)
+mars_status_t ScalerOps::fit(mars_scaler_t *s, const double *x, size_t n, uint32_t d)
 {
     size_t i;
     uint32_t j;
 
-    if ((s == NULL) || (x == NULL) || (n == 0U) || (d == 0U) || (d > RT_MAX_AUG_FEATURES)) {
-        return RT_ERR_ARG;
+    if ((s == NULL) || (x == NULL) || (n == 0U) || (d == 0U) || (d > MARS_MAX_AUG_FEATURES)) {
+        return MARS_ERR_ARG;
     }
 
     memset(s, 0, sizeof(*s));
@@ -53,42 +53,42 @@ rt_status_t ScalerOps::fit(rt_scaler_t *s, const double *x, size_t n, uint32_t d
         }
     }
 
-    return RT_OK;
+    return MARS_OK;
 }
 
 
-void ScalerOps::applyVec(const rt_scaler_t *s, const double *x, double *z)
+void ScalerOps::applyVec(const mars_scaler_t *s, const double *x, double *z)
 {
     uint32_t j;
 
     for (j = 0U; j < s->d; ++j) {
-        z[j] = (x[j] - s->mean[j]) / (s->sd[j] + RT_EPS);
+        z[j] = (x[j] - s->mean[j]) / (s->sd[j] + MARS_EPS);
         z[j] = clip(z[j], -12.0, 12.0);
     }
 }
 
 
-void ScalerOps::rowsToMatrixReg(const rt_data_t *d, size_t start, size_t end, double *x)
+void ScalerOps::rowsToMatrixReg(const mars_data_t *d, size_t start, size_t end, double *x)
 {
     size_t i;
     uint32_t j;
 
     for (i = start; i < end; ++i) {
-        for (j = 0U; j < RT_MAX_REG_FEATURES; ++j) {
-            x[((i - start) * RT_MAX_REG_FEATURES) + j] = d->row[i].reg[j];
+        for (j = 0U; j < MARS_MAX_REG_FEATURES; ++j) {
+            x[((i - start) * MARS_MAX_REG_FEATURES) + j] = d->row[i].reg[j];
         }
     }
 }
 
 
-void ScalerOps::rowsToMatrixBase(const rt_data_t *d, size_t start, size_t end, double *x)
+void ScalerOps::rowsToMatrixBase(const mars_data_t *d, size_t start, size_t end, double *x)
 {
     size_t i;
     uint32_t j;
 
     for (i = start; i < end; ++i) {
-        for (j = 0U; j < RT_MAX_BASE_FEATURES; ++j) {
-            x[((i - start) * RT_MAX_BASE_FEATURES) + j] = d->row[i].base[j];
+        for (j = 0U; j < MARS_MAX_BASE_FEATURES; ++j) {
+            x[((i - start) * MARS_MAX_BASE_FEATURES) + j] = d->row[i].base[j];
         }
     }
 }
