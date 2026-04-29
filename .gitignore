@@ -1,4 +1,9 @@
 mars
+eth-node/data/
+.secrets/
+.env
+.env.*
+!.env.example
 *.o
 *.model
 *.mars
