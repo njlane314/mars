@@ -238,6 +238,7 @@ private:
         cfg.buffer_ticks = m.buffer_ticks;
         cfg.max_spread_ticks = m.max_spread_ticks;
         cfg.pos_max = m.pos_max;
+        cfg.risk_lambda = m.risk_lambda;
 
         st = features::make(d, &cfg);
         if (st != MARS_OK) {

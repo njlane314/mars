@@ -224,6 +224,7 @@ def create_feature_view(db):
     db.executescript(
         """
         DROP VIEW IF EXISTS bq_feature_hourly;
+        DROP VIEW IF EXISTS bq_eth_bars;
         DROP VIEW IF EXISTS bq_ethbtc_bars;
         CREATE VIEW bq_feature_hourly AS
         WITH l2 AS (
@@ -314,6 +315,50 @@ def create_feature_view(db):
           target_ethbtc_4h,
           target_ethbtc_24h
         FROM stats;
+
+        CREATE VIEW bq_eth_bars AS
+        SELECT f.ts AS ts,
+          e.eth_price AS bid,
+          e.eth_price AS ask,
+          e.weth_usdc_buy_eth AS bid_sz,
+          e.weth_usdc_sell_eth AS ask_sz,
+          e.weth_usdc_swap_volume_eth AS volume,
+          e.eth_price * e.btc_eth_price AS btc_price,
+          f.eth_ret AS eth_ret,
+          f.btc_ret AS btc_ret,
+          f.ethbtc_ret AS ethbtc_ret,
+          f.eth_flow AS eth_flow,
+          f.eth_base_fee_z AS eth_base_fee_z,
+          f.eth_gas_used_z AS eth_gas_used_z,
+          f.eth_tx_count_z AS eth_tx_count_z,
+          f.stablecoin_flow_z AS stablecoin_flow_z,
+          f.l2_activity_z AS l2_activity_z,
+          f.btc_chain_activity_z AS btc_chain_activity_z,
+          f.news_risk_z AS news_risk_z,
+          f.fred_macro_risk_z AS fred_macro_risk_z
+        FROM bq_feature_hourly f
+        JOIN bq_eth_hourly e ON e.ts=f.ts
+        WHERE e.eth_price IS NOT NULL
+          AND e.eth_price > 0.0
+          AND e.btc_eth_price IS NOT NULL
+          AND e.btc_eth_price > 0.0
+          AND e.weth_usdc_swap_volume_eth IS NOT NULL
+          AND e.weth_usdc_swap_volume_eth > 0.0
+          AND e.weth_usdc_buy_eth IS NOT NULL
+          AND e.weth_usdc_sell_eth IS NOT NULL
+          AND (e.weth_usdc_buy_eth + e.weth_usdc_sell_eth) > 0.0
+          AND f.eth_ret IS NOT NULL
+          AND f.btc_ret IS NOT NULL
+          AND f.ethbtc_ret IS NOT NULL
+          AND f.eth_flow IS NOT NULL
+          AND f.eth_base_fee_z IS NOT NULL
+          AND f.eth_gas_used_z IS NOT NULL
+          AND f.eth_tx_count_z IS NOT NULL
+          AND f.stablecoin_flow_z IS NOT NULL
+          AND f.l2_activity_z IS NOT NULL
+          AND f.btc_chain_activity_z IS NOT NULL
+          AND f.news_risk_z IS NOT NULL
+          AND f.fred_macro_risk_z IS NOT NULL;
 
         CREATE VIEW bq_ethbtc_bars AS
         SELECT f.ts AS ts,

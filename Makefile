@@ -15,7 +15,7 @@ BUILDDIR ?= build
 OBJDIR = $(BUILDDIR)/obj
 PROG = $(BUILDDIR)/mars
 
-OBJS = $(OBJDIR)/main.o $(OBJDIR)/core.o $(OBJDIR)/data.o $(OBJDIR)/features.o $(OBJDIR)/scale.o $(OBJDIR)/hmm.o $(OBJDIR)/alpha.o $(OBJDIR)/backtest.o $(OBJDIR)/store.o $(OBJDIR)/report.o $(OBJDIR)/db.o $(OBJDIR)/dex.o
+OBJS = $(OBJDIR)/main.o $(OBJDIR)/core.o $(OBJDIR)/data.o $(OBJDIR)/features.o $(OBJDIR)/target.o $(OBJDIR)/cost.o $(OBJDIR)/scale.o $(OBJDIR)/hmm.o $(OBJDIR)/alpha.o $(OBJDIR)/backtest.o $(OBJDIR)/store.o $(OBJDIR)/report.o $(OBJDIR)/db.o $(OBJDIR)/dex.o
 
 all: $(PROG)
 
@@ -34,8 +34,14 @@ $(OBJDIR)/core.o: $(SRC)/core.cpp $(SRC)/api.h $(SRC)/alpha.hpp $(SRC)/backtest.
 $(OBJDIR)/data.o: $(SRC)/data.cpp $(SRC)/data.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/data.cpp -o $(OBJDIR)/data.o
 
-$(OBJDIR)/features.o: $(SRC)/features.cpp $(SRC)/features.hpp $(SRC)/api.h | $(OBJDIR)
+$(OBJDIR)/features.o: $(SRC)/features.cpp $(SRC)/features.hpp $(SRC)/target.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/features.cpp -o $(OBJDIR)/features.o
+
+$(OBJDIR)/target.o: $(SRC)/target.cpp $(SRC)/target.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/target.cpp -o $(OBJDIR)/target.o
+
+$(OBJDIR)/cost.o: $(SRC)/cost.cpp $(SRC)/cost.hpp $(SRC)/api.h | $(OBJDIR)
+	$(CXX) $(CXXFLAGS) -c $(SRC)/cost.cpp -o $(OBJDIR)/cost.o
 
 $(OBJDIR)/scale.o: $(SRC)/scale.cpp $(SRC)/scale.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/scale.cpp -o $(OBJDIR)/scale.o
@@ -46,7 +52,7 @@ $(OBJDIR)/hmm.o: $(SRC)/hmm.cpp $(SRC)/hmm.hpp $(SRC)/scale.hpp $(SRC)/api.h | $
 $(OBJDIR)/alpha.o: $(SRC)/alpha.cpp $(SRC)/alpha.hpp $(SRC)/backtest.hpp $(SRC)/hmm.hpp $(SRC)/scale.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/alpha.cpp -o $(OBJDIR)/alpha.o
 
-$(OBJDIR)/backtest.o: $(SRC)/backtest.cpp $(SRC)/backtest.hpp $(SRC)/api.h | $(OBJDIR)
+$(OBJDIR)/backtest.o: $(SRC)/backtest.cpp $(SRC)/backtest.hpp $(SRC)/cost.hpp $(SRC)/api.h | $(OBJDIR)
 	$(CXX) $(CXXFLAGS) -c $(SRC)/backtest.cpp -o $(OBJDIR)/backtest.o
 
 $(OBJDIR)/store.o: $(SRC)/store.cpp $(SRC)/store.hpp $(SRC)/api.h | $(OBJDIR)

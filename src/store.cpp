@@ -132,6 +132,7 @@ mars_config_t store::default_config(void)
     c.buffer_ticks = env_double("MARS_BUFFER", MARS_DEFAULT_BUFFER, 0.0, 1000000.0);
     c.max_spread_ticks = env_double("MARS_MAX_SPREAD", MARS_DEFAULT_MAX_SPREAD, 0.0, 1000000.0);
     c.pos_max = env_double("MARS_POS_MAX", MARS_DEFAULT_POS_MAX, 0.0, 1000000.0);
+    c.risk_lambda = env_double("MARS_RISK_LAMBDA", 0.25, 0.0, 1000000.0);
     return c;
 }
 
@@ -158,5 +159,6 @@ mars_status_t store::init_from_config(mars_model_t *m, const mars_config_t *cfg,
     m->buffer_ticks = cfg->buffer_ticks;
     m->max_spread_ticks = cfg->max_spread_ticks;
     m->pos_max = cfg->pos_max;
+    m->risk_lambda = cfg->risk_lambda;
     return MARS_OK;
 }

@@ -117,11 +117,17 @@ COMMANDS
                MARS_BUFFER
                MARS_MAX_SPREAD
                MARS_POS_MAX
+               MARS_RISK_LAMBDA
                MARS_TURNOVER_PENALTY
                MARS_FIT_MAX_STATES
 
           These are stored in the fitted model. replay-db uses the saved model
           values, so replay does not need the same environment variables.
+          MARS_RISK_LAMBDA adds a volatility-scaled no-trade charge. The
+          replay gate is:
+
+               abs(forecast) > edge_cost + buffer + risk_lambda * risk
+
           MARS_TURNOVER_PENALTY and MARS_FIT_MAX_STATES affect model selection
           only.
 
@@ -164,10 +170,10 @@ COMMANDS
           Import real hourly BigQuery aggregates for Ethereum, L2 activity,
           Bitcoin chain activity, and GDELT news intensity. This creates
           bq_eth_hourly, bq_l2_hourly, bq_btc_hourly, bq_gdelt_hourly, and
-          bq_feature_hourly. It also creates bq_ethbtc_bars, a training view
-          for ETH/BTC from observed WBTC/WETH pool price and volume. Missing
-          fields remain NULL; for example eth_funding is not populated without
-          a real funding-rate source.
+          bq_feature_hourly. It also creates bq_eth_bars, a training view for
+          ETH spot residualized against BTC, and bq_ethbtc_bars for ETH/BTC.
+          Missing fields remain NULL; for example eth_funding is not populated
+          without a real funding-rate source.
 
 DATABASE
      The local learning database is SQLite. Initialize it with:
@@ -191,11 +197,22 @@ DATABASE
                mars fit-db market.db es.mars my_market_view
 
           Columns after volume are optional auxiliary features. The bundled
-          bq_ethbtc_bars view uses this to train from observed hourly ETH/BTC
-          pool prices plus real chain, L2, Bitcoin, GDELT, and FRED features:
+          bq_eth_bars view uses this to train from observed hourly WETH/USDC
+          spot prices, rolling BTC residualization, and real chain, L2,
+          Bitcoin, GDELT, and FRED features:
 
-               MARS_TICK_SIZE=0.000001 MARS_HORIZON=24 \
-                    mars fit-db market.db ethbtc.mars bq_ethbtc_bars
+               MARS_TICK_SIZE=0.01 MARS_HORIZON=24 \
+                    mars fit-db market.db eth.mars bq_eth_bars
+
+               mars replay-db market.db eth.mars trades.csv bq_eth_bars
+
+          For bq_eth_bars, BTC price is the first auxiliary column. mars uses a
+          causal rolling beta to train on ETH residual returns:
+
+               ETH return - beta * BTC return
+
+          Replay trades are written with factor price, beta, forecast, risk,
+          no-trade threshold, position, and realized residual PnL columns.
 
      Ethereum DEX trade bars
           When market_bars has fewer than the minimum training rows and no

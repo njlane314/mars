@@ -60,9 +60,9 @@ mars_status_t report::inspect_model(const char *model_path)
 
     (void)printf("model version=%u K=%u horizon=%u tick_size=%.8f\n",
                  m.version, m.k, m.horizon, m.tick_size);
-    (void)printf("costs turn=%.6f edge=%.6f buffer=%.6f max_spread=%.6f pos_max=%.2f\n",
+    (void)printf("costs turn=%.6f edge=%.6f buffer=%.6f max_spread=%.6f pos_max=%.2f risk_lambda=%.6f\n",
                  m.turn_cost_ticks, m.edge_cost_ticks, m.buffer_ticks,
-                 m.max_spread_ticks, m.pos_max);
+                 m.max_spread_ticks, m.pos_max, m.risk_lambda);
     (void)printf("aug_dim=%u alpha_intercept_ticks=%.10f\n",
                  m.aug_dim, m.alpha_intercept);
 

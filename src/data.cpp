@@ -10,6 +10,13 @@
 
 namespace {
 
+static int env_flag(const char *name)
+{
+    const char *s = getenv(name);
+
+    return ((s != NULL) && (s[0] != '\0') && (s[0] != '0')) ? 1 : 0;
+}
+
 static const char *default_table(const char *table)
 {
     if ((table == NULL) || (table[0] == '\0')) {
@@ -284,6 +291,11 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
         } else {
             sql = "SELECT * FROM " + quote_ident(table) + " ORDER BY ts";
         }
+    }
+
+    d->flags = 0U;
+    if ((std::string(table) == "bq_eth_bars") || (env_flag("MARS_RESIDUAL_BTC") != 0)) {
+        d->flags |= MARS_DATA_RESIDUAL_BTC;
     }
 
     st = load_query(db, sql, cap, trade_source, d);

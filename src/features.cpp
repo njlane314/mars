@@ -2,6 +2,7 @@
 #include <stdlib.h>
 
 #include "features.hpp"
+#include "target.hpp"
 
 static double dabs(double x)
 {
@@ -227,14 +228,9 @@ mars_status_t features::make(mars_data_t *d, const mars_config_t *cfg)
         r->base[30] = r->aux[14];
         r->base[31] = r->aux[15];
 
-        if (cfg->horizon + t + 1U < d->n) {
-            r->label_ticks = (d->row[t + cfg->horizon + 1U].mid -
-                              d->row[t + 1U].mid) / cfg->tick_size;
-        } else {
-            r->label_ticks = 0.0;
-        }
-
     }
+
+    st = target::make(d, cfg);
 
 done:
     free(ret1);

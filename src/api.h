@@ -4,7 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MARS_VERSION              3U
+#define MARS_VERSION              4U
 #define MARS_MAGIC                0x4d415253U  /* "MARS" */
 
 #define MARS_MAX_LINE             512U
@@ -30,6 +30,8 @@
 #define MARS_VAR_FLOOR            1.0e-4
 #define MARS_LOG_ZERO             (-1.0e300)
 #define MARS_ETH_LATEST           UINT64_MAX
+#define MARS_DATA_RESIDUAL_BTC    1U
+#define MARS_AUX_FACTOR_PRICE     0U
 
 typedef enum
 {
@@ -60,7 +62,11 @@ typedef struct
     double ofi1_norm;
     double ofi5_norm;
     double ret1_ticks;
+    double trade_ret_ticks;
     double label_ticks;
+    double factor_mid;
+    double factor_beta;
+    double risk_ticks;
 
     double aux[MARS_MAX_AUX_FEATURES];
     double reg[MARS_MAX_REG_FEATURES];
@@ -71,6 +77,7 @@ typedef struct
 {
     mars_row_t *row;
     size_t n;
+    uint32_t flags;
 } mars_data_t;
 
 typedef struct
@@ -106,6 +113,7 @@ typedef struct
     double buffer_ticks;
     double max_spread_ticks;
     double pos_max;
+    double risk_lambda;
 
     mars_hmm_t hmm;
     mars_scaler_t base_scaler;
@@ -124,6 +132,7 @@ typedef struct
     double buffer_ticks;
     double max_spread_ticks;
     double pos_max;
+    double risk_lambda;
 } mars_config_t;
 
 typedef struct

@@ -3,11 +3,7 @@
 #include <string.h>
 
 #include "backtest.hpp"
-
-static double dabs(double x)
-{
-    return (x < 0.0) ? -x : x;
-}
+#include "cost.hpp"
 
 
 static double dmax(double a, double b)
@@ -22,21 +18,9 @@ static double dmin(double a, double b)
 }
 
 
-static double prediction_to_pos(const mars_model_t *m, const mars_row_t *r, double pred_ticks)
+static double dabs(double x)
 {
-    const double threshold = m->edge_cost_ticks + m->buffer_ticks;
-
-    if (r->spread_ticks > m->max_spread_ticks) {
-        return 0.0;
-    }
-
-    if (pred_ticks > threshold) {
-        return m->pos_max;
-    }
-    if (pred_ticks < -threshold) {
-        return -m->pos_max;
-    }
-    return 0.0;
+    return (x < 0.0) ? -x : x;
 }
 
 
@@ -62,17 +46,20 @@ mars_bt_stats_t backtest::evaluate(
     if (trades_path != NULL) {
         fp = fopen(trades_path, "w");
         if (fp != NULL) {
-            (void)fprintf(fp, "ts,mid,pred_ticks,pos,target,bar_pnl_ticks,cost_ticks,equity_ticks\n");
+            (void)fprintf(fp,
+                          "ts,mid,factor_mid,factor_beta,pred_ticks,risk_ticks,"
+                          "threshold_ticks,pos,target,bar_pnl_ticks,cost_ticks,equity_ticks\n");
         }
     }
 
     for (i = start + 1U; i < end; ++i) {
         const size_t pidx = i - start;
-        const double target = prediction_to_pos(m, &d->row[i - 1U], pred[pidx - 1U]);
+        const double target = cost::position(m, &d->row[i - 1U], pred[pidx - 1U]);
+        const double band = cost::threshold(m, &d->row[i - 1U]);
         const double turnover = dabs(target - pos);
-        const double cost = turnover * m->turn_cost_ticks;
-        const double bar = pos * ((d->row[i].mid - d->row[i - 1U].mid) / m->tick_size);
-        const double net = bar - cost;
+        const double fee = turnover * m->turn_cost_ticks;
+        const double bar = pos * d->row[i].trade_ret_ticks;
+        const double net = bar - fee;
 
         if (turnover > MARS_EPS) {
             s.trades += 1.0;
@@ -80,7 +67,7 @@ mars_bt_stats_t backtest::evaluate(
         }
 
         s.gross_pnl_ticks += bar;
-        s.cost_ticks += cost;
+        s.cost_ticks += fee;
         s.net_pnl_ticks += net;
         ss += net * net;
         eq += net;
@@ -89,14 +76,19 @@ mars_bt_stats_t backtest::evaluate(
         ++n;
 
         if (fp != NULL) {
-            (void)fprintf(fp, "%llu,%.10f,%.10f,%.4f,%.4f,%.10f,%.10f,%.10f\n",
+            (void)fprintf(fp,
+                          "%llu,%.10f,%.10f,%.10f,%.10f,%.10f,%.10f,%.4f,%.4f,%.10f,%.10f,%.10f\n",
                           (unsigned long long)d->row[i].ts,
                           d->row[i].mid,
+                          d->row[i].factor_mid,
+                          d->row[i - 1U].factor_beta,
                           pred[pidx - 1U],
+                          d->row[i - 1U].risk_ticks,
+                          band,
                           pos,
                           target,
                           net,
-                          cost,
+                          fee,
                           eq);
         }
 
