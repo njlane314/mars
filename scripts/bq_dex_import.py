@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Import Uniswap V3 WETH/USDC swaps from Google BigQuery into mars SQLite.
+Import Uniswap V3 WETH/USDC swap events from Google BigQuery into mars SQLite.
 
 The script uses the Google Cloud `bq` command, keeps query windows bounded, and
 does a dry run before each real query so maximum_bytes_billed can stop mistakes.
+This is for small diagnostics. Large training runs should use bq_feature_import.py,
+which aggregates in BigQuery and stores compact feature rows locally.
 """
 
 import argparse
@@ -238,6 +240,7 @@ def main():
     parser.add_argument("--bq", default=os.getenv("BQ_BIN", "bq"))
     parser.add_argument("--mars", default=os.getenv("MARS_BIN", "build/mars"))
     parser.add_argument("--run", action="store_true")
+    parser.add_argument("--raw-ok", action="store_true")
     args = parser.parse_args()
 
     if args.project is None or args.project == "":
@@ -252,6 +255,8 @@ def main():
     end = parse_time(args.end)
     if start >= end:
         return die("start must be before end")
+    if args.run and not args.raw_ok:
+        return die("raw event import is diagnostic only; use bq_feature_import.py for training or pass --raw-ok")
 
     if ensure_schema(args.db_path, args.mars) != 0:
         return 1

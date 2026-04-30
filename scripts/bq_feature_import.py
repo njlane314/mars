@@ -3,7 +3,8 @@
 Import observed hourly external features from BigQuery into mars SQLite.
 
 The script only imports aggregates computed from public source rows. It does not
-fill missing market data with generated values; unavailable fields remain NULL.
+copy raw blockchain tables or raw event streams into SQLite. It does not fill
+missing market data with generated values; unavailable fields remain NULL.
 """
 
 import argparse

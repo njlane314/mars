@@ -154,11 +154,11 @@ COMMANDS
      mars fred-export market.db fred.csv
           Export stored FRED observations.
 
-     scripts/bq_dex_import.py market.db START END --project PROJECT --run
-          Import decoded Uniswap V3 WETH/USDC swaps from Google's BigQuery
-          public Ethereum dataset into dex_swaps. START and END are UTC dates
-          or timestamps; END is exclusive. The script runs a BigQuery dry run
-          before each chunk and uses maximum_bytes_billed as a guardrail.
+     scripts/bq_dex_import.py market.db START END --project PROJECT --run --raw-ok
+          Diagnostic-only importer for decoded Uniswap V3 WETH/USDC swap
+          events. Do not use this for large training history. The training path
+          is bq_feature_import.py, which aggregates inside BigQuery and stores
+          compact feature rows locally.
 
      scripts/bq_feature_import.py market.db START END --project PROJECT --run
           Import real hourly BigQuery aggregates for Ethereum, L2 activity,
@@ -214,10 +214,11 @@ DATABASE
                mars dex-update market.db 0 latest
 
           For larger historical backfills, use BigQuery after installing and
-          authenticating the Google Cloud SDK:
+          authenticating the Google Cloud SDK. BigQuery scans public blockchain
+          tables and returns compact hourly feature rows; mars.db does not store
+          raw BigQuery blockchain tables:
 
                export BIGQUERY_PROJECT=...
-               scripts/bq_dex_import.py market.db 2023-01-01 2026-04-30 --run
                scripts/bq_feature_import.py market.db 2023-01-01 2026-04-30 --run
 
           DEX tables:
