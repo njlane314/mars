@@ -66,7 +66,8 @@ FILES
           commands.
 
      src/dex.cpp, src/dex.hpp
-          dex: on-chain Uniswap V3 WETH/USDC swap ingestion and training view.
+          dex: on-chain Uniswap V3 WETH/USDC swap ingestion and trade-bar
+          training view.
 
      Makefile
           Builds and installs mars. DB ingestion links against libcurl and
@@ -75,8 +76,8 @@ FILES
 INPUT
      DB commands write local SQLite data. Training reads market bars directly
      from SQLite through fit-db and replay-db. If the default market_bars table
-     is empty, fit-db and replay-db first use on-chain DEX WETH/USDC swaps when
-     available, then fall back to a derived Ethereum base-fee series.
+     is empty, fit-db and replay-db use observed on-chain DEX WETH/USDC trade
+     bars when available.
      mars does not fetch centralized-exchange ETH/USD candles; built-in ETH
      price rows are sourced from Ethereum JSON-RPC logs.
 
@@ -95,8 +96,8 @@ COMMANDS
           Inspect learned latent states and sparse alpha coefficients.
 
      mars fit-db market.db es.mars
-          Fit a model from market_bars, or from derived Ethereum chain data when
-          market_bars is empty.
+          Fit a model from market_bars, or from observed Ethereum DEX trade
+          bars when market_bars is empty.
 
      mars fit-db market.db es.mars my_bars
           Fit directly from another table or view with the market-bar schema.
@@ -151,6 +152,12 @@ COMMANDS
      mars fred-export market.db fred.csv
           Export stored FRED observations.
 
+     scripts/bq_dex_import.py market.db START END --project PROJECT --run
+          Import decoded Uniswap V3 WETH/USDC swaps from Google's BigQuery
+          public Ethereum dataset into dex_swaps. START and END are UTC dates
+          or timestamps; END is exclusive. The script runs a BigQuery dry run
+          before each chunk and uses maximum_bytes_billed as a guardrail.
+
 DATABASE
      The local learning database is SQLite. Initialize it with:
 
@@ -172,36 +179,40 @@ DATABASE
 
                mars fit-db market.db es.mars my_market_view
 
-     Ethereum DEX bars
+     Ethereum DEX trade bars
           When market_bars has fewer than the minimum training rows and no
-          explicit table is supplied, mars first reads the dex_training_bars
+          explicit table is supplied, mars first reads the dex_trade_bars
           view. This trains an ETH spot-price movement model from on-chain
           WETH/USDC swaps, not centralized-exchange candles.
 
-          The view derives one market-bar-shaped row per active minute from
+          The view derives one observed trade-bar row per active minute from
           real Uniswap V3 Swap events. It uses the last swap price in that
-          minute as the close, signed swap direction for bid/ask size pressure,
-          actual swap sizes as volume input, Ethereum block fields when
-          present, and FRED macro observations as-of the minute timestamp.
+          minute, signed buy/sell base amounts, quote volume, Ethereum block
+          fields when present, and FRED macro observations as-of the minute
+          timestamp. It does not fabricate bid/ask quotes or order-book depth.
 
                export ETH_RPC_URL=http://127.0.0.1:8545
                mars dex-update market.db 19000000 19001000
                mars dex-update market.db 0 latest
 
+          For larger historical backfills, use BigQuery after installing and
+          authenticating the Google Cloud SDK:
+
+               export BIGQUERY_PROJECT=...
+               scripts/bq_dex_import.py market.db 2023-01-01 2026-04-30 --run
+
           DEX tables:
 
                dex_swaps
-               dex_training_bars
+               dex_trade_bars
 
      Ethereum base-fee bars
-          If neither market_bars nor dex_training_bars has enough rows, mars
-          reads the basefee_training_bars view. This trains a base-fee movement
-          model, not an ETH spot-price model.
+          basefee_training_bars is a diagnostic view, not an automatic training
+          fallback. It is a derived base-fee movement view, not an ETH
+          spot-price model.
 
-          The view derives bid/ask-shaped rows from real eth_block_features:
-          base_fee_gwei is scaled by 100 so sub-gwei moves fit the default tick
-          model. Its default auxiliary features are Ethereum-chain fields and
-          FRED macro observations as-of the block timestamp.
+          The view derives a base-fee movement series from real
+          eth_block_features. It is not used by default for ETH spot training.
 
      Ethereum chain data
           mars talks to an Ethereum execution JSON-RPC endpoint and calls
@@ -221,7 +232,7 @@ DATABASE
                eth_txs
                eth_block_features
                dex_swaps
-               dex_training_bars
+               dex_trade_bars
                basefee_training_bars
 
           Block header fields are stored from JSON-RPC observations.

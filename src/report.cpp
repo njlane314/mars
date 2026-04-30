@@ -32,9 +32,9 @@ static void print_reg_feature_name(uint32_t j)
         "abs_ret5_ticks",
         "rv30_ticks",
         "spread_ticks",
-        "log_depth",
-        "book_imbalance",
-        "ofi5_norm"
+        "log_size",
+        "size_imbalance",
+        "flow5_norm"
     };
 
     if (j < MARS_MAX_REG_FEATURES) {
@@ -93,4 +93,3 @@ mars_status_t report::inspect_model(const char *model_path)
 
     return MARS_OK;
 }
-

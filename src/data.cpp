@@ -124,35 +124,22 @@ static mars_status_t count_rows(sqlite3 *db, const char *table, size_t *n_out)
 }
 
 
-static std::string basefee_count_sql(void)
-{
-    return "SELECT count(*) FROM basefee_training_bars";
-}
-
-
 static std::string dex_count_sql(void)
 {
-    return "SELECT count(*) FROM dex_training_bars";
+    return "SELECT count(*) FROM dex_trade_bars";
 }
 
 
-static std::string dex_training_sql(void)
+static std::string dex_trade_sql(void)
 {
-    return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
+    return "SELECT ts,price,buy_base_amount,sell_base_amount,quote_amount,"
            "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
-           "FROM dex_training_bars ORDER BY ts";
+           "FROM dex_trade_bars ORDER BY ts";
 }
 
 
-static std::string basefee_training_sql(void)
-{
-    return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
-           "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
-           "FROM basefee_training_bars ORDER BY ts";
-}
-
-
-static mars_status_t load_query(sqlite3 *db, const std::string &sql, size_t cap, mars_data_t *d)
+static mars_status_t load_query(sqlite3 *db, const std::string &sql, size_t cap,
+                                int trade_source, mars_data_t *d)
 {
     sqlite3_stmt *stmt = NULL;
     size_t n = 0U;
@@ -193,7 +180,7 @@ static mars_status_t load_query(sqlite3 *db, const std::string &sql, size_t cap,
             data::release(d);
             return MARS_ERR_PARSE;
         }
-        for (col = 1; col <= 5; ++col) {
+        for (col = 1; col <= 5 - trade_source; ++col) {
             if (sqlite3_column_type(stmt, col) == SQLITE_NULL) {
                 sqlite3_finalize(stmt);
                 data::release(d);
@@ -203,13 +190,22 @@ static mars_status_t load_query(sqlite3 *db, const std::string &sql, size_t cap,
 
         r = &d->row[n];
         r->ts = (uint64_t)ts;
-        r->bid = sqlite3_column_double(stmt, 1);
-        r->ask = sqlite3_column_double(stmt, 2);
-        r->bid_sz = sqlite3_column_double(stmt, 3);
-        r->ask_sz = sqlite3_column_double(stmt, 4);
-        r->volume = sqlite3_column_double(stmt, 5);
+        if (trade_source != 0) {
+            const double price = sqlite3_column_double(stmt, 1);
+            r->bid = price;
+            r->ask = price;
+            r->bid_sz = sqlite3_column_double(stmt, 2);
+            r->ask_sz = sqlite3_column_double(stmt, 3);
+            r->volume = sqlite3_column_double(stmt, 4);
+        } else {
+            r->bid = sqlite3_column_double(stmt, 1);
+            r->ask = sqlite3_column_double(stmt, 2);
+            r->bid_sz = sqlite3_column_double(stmt, 3);
+            r->ask_sz = sqlite3_column_double(stmt, 4);
+            r->volume = sqlite3_column_double(stmt, 5);
+        }
         for (aux = 0; aux < (int)MARS_MAX_AUX_FEATURES; ++aux) {
-            const int src_col = 6 + aux;
+            const int src_col = 6 + aux - trade_source;
             r->aux[aux] = (sqlite3_column_count(stmt) > src_col) ?
                 sqlite3_column_double(stmt, src_col) : 0.0;
             if (isfinite(r->aux[aux]) == 0) {
@@ -246,6 +242,7 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
     const char *table = default_table(table_arg);
     sqlite3 *db = NULL;
     size_t cap = 0U;
+    int trade_source = 0;
     mars_status_t st;
     std::string sql;
 
@@ -271,18 +268,8 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
             return st;
         }
         if (cap >= MARS_MIN_TRAIN_ROWS) {
-            sql = dex_training_sql();
-        }
-    }
-
-    if ((cap < MARS_MIN_TRAIN_ROWS) && (table_arg == NULL) && sql.empty()) {
-        st = count_sql(db, basefee_count_sql(), &cap);
-        if (st != MARS_OK) {
-            sqlite3_close(db);
-            return st;
-        }
-        if (cap >= MARS_MIN_TRAIN_ROWS) {
-            sql = basefee_training_sql();
+            sql = dex_trade_sql();
+            trade_source = 1;
         }
     }
 
@@ -291,11 +278,16 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
             sqlite3_close(db);
             return MARS_ERR_STATE;
         }
-        sql = "SELECT ts,bid,ask,bid_sz,ask_sz,volume FROM " +
-              quote_ident(table) + " ORDER BY ts";
+        if (std::string(table) == "dex_trade_bars") {
+            sql = dex_trade_sql();
+            trade_source = 1;
+        } else {
+            sql = "SELECT ts,bid,ask,bid_sz,ask_sz,volume FROM " +
+                  quote_ident(table) + " ORDER BY ts";
+        }
     }
 
-    st = load_query(db, sql, cap, d);
+    st = load_query(db, sql, cap, trade_source, d);
     sqlite3_close(db);
     return st;
 }

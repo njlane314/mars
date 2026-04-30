@@ -19,7 +19,7 @@ static void usage(const char *argv0)
                   "  %s fit-db market.db model.mars [table]\n"
                   "  %s replay-db market.db model.mars trades.csv [table]\n"
                   "  %s inspect model.mars\n\n"
-                  "default db source: market_bars; falls back to DEX/FRED then base fee\n"
+                  "default db source: market_bars; falls back to observed DEX/FRED trade bars\n"
                   "defaults: ES/MES-like 1-second bars, horizon=%u bars, tick=%.8f\n",
                   argv0, argv0, argv0,
                   MARS_DEFAULT_HORIZON, MARS_DEFAULT_TICK_SIZE);

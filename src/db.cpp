@@ -1174,7 +1174,6 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
     sqlite3 *db = NULL;
     sqlite3_int64 market_rows = 0;
     sqlite3_int64 dex_rows = 0;
-    sqlite3_int64 basefee_rows = 0;
     mars_status_t st;
 
     st = db_open(db_path, &db);
@@ -1224,9 +1223,9 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
         sqlite3_close(db);
         return st;
     }
-    st = print_summary_row(db, "dex_training_bars",
+    st = print_summary_row(db, "dex_trade_bars",
         "SELECT count(*) AS rows,datetime(min(ts),'unixepoch') AS first_utc,"
-        "datetime(max(ts),'unixepoch') AS last_utc FROM dex_training_bars");
+        "datetime(max(ts),'unixepoch') AS last_utc FROM dex_trade_bars");
     if (st != MARS_OK) {
         sqlite3_close(db);
         return st;
@@ -1256,26 +1255,17 @@ extern "C" mars_status_t mars_db_summary(const char *db_path)
         sqlite3_close(db);
         return st;
     }
-    st = summary_i64(db, "SELECT count(*) FROM dex_training_bars", &dex_rows);
+    st = summary_i64(db, "SELECT count(*) FROM dex_trade_bars", &dex_rows);
     if (st != MARS_OK) {
         sqlite3_close(db);
         return st;
     }
-    st = summary_i64(db, "SELECT count(*) FROM basefee_training_bars", &basefee_rows);
-    if (st != MARS_OK) {
-        sqlite3_close(db);
-        return st;
-    }
-
     if (market_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
         (void)printf("training_source: market_bars rows=%lld min_rows=%u\n",
                      (long long)market_rows, MARS_MIN_TRAIN_ROWS);
     } else if (dex_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
-        (void)printf("training_source: dex_training_bars rows=%lld min_rows=%u\n",
+        (void)printf("training_source: dex_trade_bars rows=%lld min_rows=%u\n",
                      (long long)dex_rows, MARS_MIN_TRAIN_ROWS);
-    } else if (basefee_rows >= (sqlite3_int64)MARS_MIN_TRAIN_ROWS) {
-        (void)printf("training_source: basefee_training_bars rows=%lld min_rows=%u\n",
-                     (long long)basefee_rows, MARS_MIN_TRAIN_ROWS);
     } else {
         (void)printf("training_source: none rows=0 min_rows=%u\n", MARS_MIN_TRAIN_ROWS);
     }
