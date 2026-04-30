@@ -115,10 +115,12 @@ COMMANDS
                MARS_MAX_SPREAD
                MARS_POS_MAX
                MARS_TURNOVER_PENALTY
+               MARS_FIT_MAX_STATES
 
           These are stored in the fitted model. replay-db uses the saved model
           values, so replay does not need the same environment variables.
-          MARS_TURNOVER_PENALTY affects model selection only.
+          MARS_TURNOVER_PENALTY and MARS_FIT_MAX_STATES affect model selection
+          only.
 
      mars db-init market.db
           Initialize the local SQLite learning database.
@@ -178,9 +180,9 @@ DATABASE
 
           The view derives one market-bar-shaped row per active minute from
           real Uniswap V3 Swap events. It uses the last swap price in that
-          minute as the close, actual swap sizes as depth/volume inputs,
-          Ethereum block fields when present, and FRED macro observations as-of
-          the minute timestamp.
+          minute as the close, signed swap direction for bid/ask size pressure,
+          actual swap sizes as volume input, Ethereum block fields when
+          present, and FRED macro observations as-of the minute timestamp.
 
                export ETH_RPC_URL=http://127.0.0.1:8545
                mars dex-update market.db 19000000 19001000

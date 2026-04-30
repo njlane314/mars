@@ -3,6 +3,7 @@
  */
 
 #include <float.h>
+#include <errno.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +19,24 @@
 #include "report.hpp"
 
 namespace {
+
+static uint32_t env_u32(const char *name, uint32_t fallback, uint32_t lo, uint32_t hi)
+{
+    const char *s = getenv(name);
+    char *endp = NULL;
+    unsigned long v;
+
+    if ((s == NULL) || (s[0] == '\0')) {
+        return fallback;
+    }
+
+    errno = 0;
+    v = strtoul(s, &endp, 10);
+    if ((errno != 0) || (endp == s) || (*endp != '\0') || (v < lo) || (v > hi)) {
+        return fallback;
+    }
+    return (uint32_t)v;
+}
 
 class core final {
 public:
@@ -67,6 +86,7 @@ private:
         size_t split1;
         size_t split2;
         size_t final_train_end;
+        uint32_t max_fit_states;
         uint32_t k;
         mars_status_t st;
         const double lambdas[MARS_MAX_LAMBDAS] = {
@@ -81,6 +101,7 @@ private:
         memset(&final_model, 0, sizeof(final_model));
         memset(&best_stats, 0, sizeof(best_stats));
         cfg = store::default_config();
+        max_fit_states = env_u32("MARS_FIT_MAX_STATES", MARS_MAX_STATES, 1U, MARS_MAX_STATES);
 
         st = features::make(d, &cfg);
         if (st != MARS_OK) {
@@ -97,10 +118,10 @@ private:
         split2 = warm + (size_t)(0.80 * (double)n_usable);
         final_train_end = split2;
 
-        (void)printf("rows=%zu usable=[%zu,%zu) train=[%zu,%zu) val=[%zu,%zu) test=[%zu,%zu)\n",
-                     d->n, warm, end_usable, warm, split1, split1, split2, split2, end_usable);
+        (void)printf("rows=%zu usable=[%zu,%zu) train=[%zu,%zu) val=[%zu,%zu) test=[%zu,%zu) states=[1,%u]\n",
+                     d->n, warm, end_usable, warm, split1, split1, split2, split2, end_usable, max_fit_states);
 
-        for (k = 1U; k <= MARS_MAX_STATES; ++k) {
+        for (k = 1U; k <= max_fit_states; ++k) {
             mars_model_t m;
             double hmm_ll;
             uint32_t li;
