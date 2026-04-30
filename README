@@ -100,7 +100,9 @@ COMMANDS
           bars when market_bars is empty.
 
      mars fit-db market.db es.mars my_bars
-          Fit directly from another table or view with the market-bar schema.
+          Fit directly from another table or view whose first columns match the
+          market-bar schema. Extra numeric columns after volume are loaded as
+          auxiliary features.
 
      mars replay-db market.db es.mars trades.csv
           Replay a fitted model from the same default DB source.
@@ -158,6 +160,15 @@ COMMANDS
           or timestamps; END is exclusive. The script runs a BigQuery dry run
           before each chunk and uses maximum_bytes_billed as a guardrail.
 
+     scripts/bq_feature_import.py market.db START END --project PROJECT --run
+          Import real hourly BigQuery aggregates for Ethereum, L2 activity,
+          Bitcoin chain activity, and GDELT news intensity. This creates
+          bq_eth_hourly, bq_l2_hourly, bq_btc_hourly, bq_gdelt_hourly, and
+          bq_feature_hourly. It also creates bq_ethbtc_bars, a training view
+          for ETH/BTC from observed WBTC/WETH pool price and volume. Missing
+          fields remain NULL; for example eth_funding is not populated without
+          a real funding-rate source.
+
 DATABASE
      The local learning database is SQLite. Initialize it with:
 
@@ -178,6 +189,13 @@ DATABASE
           Any table or view with the same six columns can be used:
 
                mars fit-db market.db es.mars my_market_view
+
+          Columns after volume are optional auxiliary features. The bundled
+          bq_ethbtc_bars view uses this to train from observed hourly ETH/BTC
+          pool prices plus real chain, L2, Bitcoin, GDELT, and FRED features:
+
+               MARS_TICK_SIZE=0.000001 MARS_HORIZON=24 \
+                    mars fit-db market.db ethbtc.mars bq_ethbtc_bars
 
      Ethereum DEX trade bars
           When market_bars has fewer than the minimum training rows and no
@@ -200,6 +218,7 @@ DATABASE
 
                export BIGQUERY_PROJECT=...
                scripts/bq_dex_import.py market.db 2023-01-01 2026-04-30 --run
+               scripts/bq_feature_import.py market.db 2023-01-01 2026-04-30 --run
 
           DEX tables:
 

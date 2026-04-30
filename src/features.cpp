@@ -218,6 +218,14 @@ mars_status_t features::make(mars_data_t *d, const mars_config_t *cfg)
         r->base[21] = r->aux[5];
         r->base[22] = r->aux[6];
         r->base[23] = r->aux[7];
+        r->base[24] = r->aux[8];
+        r->base[25] = r->aux[9];
+        r->base[26] = r->aux[10];
+        r->base[27] = r->aux[11];
+        r->base[28] = r->aux[12];
+        r->base[29] = r->aux[13];
+        r->base[30] = r->aux[14];
+        r->base[31] = r->aux[15];
 
         if (cfg->horizon + t + 1U < d->n) {
             r->label_ticks = (d->row[t + cfg->horizon + 1U].mid -

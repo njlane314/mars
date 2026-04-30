@@ -282,8 +282,7 @@ mars_status_t data::load_bars(const char *db_path, const char *table_arg, mars_d
             sql = dex_trade_sql();
             trade_source = 1;
         } else {
-            sql = "SELECT ts,bid,ask,bid_sz,ask_sz,volume FROM " +
-                  quote_ident(table) + " ORDER BY ts";
+            sql = "SELECT * FROM " + quote_ident(table) + " ORDER BY ts";
         }
     }
 

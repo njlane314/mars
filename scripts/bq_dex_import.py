@@ -47,7 +47,7 @@ def quote_sql(s):
     return "'" + s.replace("\\", "\\\\").replace("'", "\\'") + "'"
 
 
-def build_sql(pool, start, end):
+def build_sql(args, pool, start, end):
     return f"""
 WITH swaps AS (
   SELECT
@@ -60,7 +60,7 @@ WITH swaps AS (
     SAFE_CAST(STRING(args[4]) AS BIGNUMERIC) AS sqrt_price_x96,
     SAFE_CAST(STRING(args[5]) AS BIGNUMERIC) AS liquidity,
     SAFE_CAST(STRING(args[6]) AS INT64) AS tick
-  FROM `bigquery-public-data.blockchain_analytics_ethereum_mainnet_us.decoded_events`
+  FROM `{args.decoded_events_table}`
   WHERE event_signature = {quote_sql(event_signature)}
     AND address = {quote_sql(pool)}
     AND block_timestamp >= TIMESTAMP({quote_sql(bq_time(start))})
@@ -223,6 +223,13 @@ def main():
     parser.add_argument("end")
     parser.add_argument("--project", default=os.getenv("BIGQUERY_PROJECT"))
     parser.add_argument("--location", default=os.getenv("BIGQUERY_LOCATION", "US"))
+    parser.add_argument(
+        "--decoded-events-table",
+        default=os.getenv(
+            "ETH_DECODED_EVENTS_TABLE",
+            "bigquery-public-data.goog_blockchain_ethereum_mainnet_us.decoded_events",
+        ),
+    )
     parser.add_argument("--pool", default=pool_default)
     parser.add_argument("--chunk-days", type=int, default=7)
     parser.add_argument("--maximum-bytes-billed", type=int, default=25_000_000_000)
@@ -256,7 +263,7 @@ def main():
 
     try:
         for lo, hi in chunks(start, end, args.chunk_days):
-            sql = build_sql(pool, lo, hi)
+            sql = build_sql(args, pool, lo, hi)
             dry = run_bq(args, sql, True)
             if dry.returncode != 0:
                 print(dry.stderr, file=sys.stderr)

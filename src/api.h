@@ -4,15 +4,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define MARS_VERSION              2U
+#define MARS_VERSION              3U
 #define MARS_MAGIC                0x4d415253U  /* "MARS" */
 
 #define MARS_MAX_LINE             512U
 #define MARS_MAX_STATES           5U
 #define MARS_MAX_REG_FEATURES     8U
-#define MARS_MAX_AUX_FEATURES     8U
-#define MARS_MAX_BASE_FEATURES    24U
-#define MARS_MAX_AUG_FEATURES     192U
+#define MARS_MAX_AUX_FEATURES     16U
+#define MARS_MAX_BASE_FEATURES    32U
+#define MARS_MAX_AUG_FEATURES     256U
 #define MARS_MAX_CD_ITERS         250U
 #define MARS_MAX_EM_ITERS         80U
 #define MARS_MAX_LAMBDAS          9U
