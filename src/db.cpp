@@ -616,15 +616,21 @@ static void bind_text_or_null(sqlite3_stmt *stmt, int col, const std::string &s)
     }
 }
 
+static int get_state_u64(sqlite3 *db, const char *key, uint64_t *v);
+
 static mars_status_t set_state(sqlite3 *db, const char *key, uint64_t v)
 {
     sqlite3_stmt *stmt = NULL;
     char buf[64];
+    uint64_t prev = 0U;
     int rc;
     mars_status_t st;
 
     if ((db == NULL) || (key == NULL)) {
         return MARS_ERR_ARG;
+    }
+    if ((get_state_u64(db, key, &prev) != 0) && (prev > v)) {
+        v = prev;
     }
 
     rc = sqlite3_prepare_v2(db,

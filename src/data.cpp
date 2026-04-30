@@ -140,7 +140,7 @@ static std::string dex_training_sql(void)
 {
     return "SELECT ts,bid,ask,bid_sz,ask_sz,volume,"
            "gas_util,tx_count,dgs2,dgs10,t10y2y,vixcls,dtwexbgs,walcl "
-           "FROM dex_training_bars ORDER BY block_number,log_index";
+           "FROM dex_training_bars ORDER BY ts";
 }
 
 

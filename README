@@ -104,6 +104,22 @@ COMMANDS
      mars replay-db market.db es.mars trades.csv
           Replay a fitted model from the same default DB source.
 
+     Training knobs
+          fit-db reads optional environment overrides for model assumptions:
+
+               MARS_HORIZON
+               MARS_TICK_SIZE
+               MARS_TURN_COST
+               MARS_EDGE_COST
+               MARS_BUFFER
+               MARS_MAX_SPREAD
+               MARS_POS_MAX
+               MARS_TURNOVER_PENALTY
+
+          These are stored in the fitted model. replay-db uses the saved model
+          values, so replay does not need the same environment variables.
+          MARS_TURNOVER_PENALTY affects model selection only.
+
      mars db-init market.db
           Initialize the local SQLite learning database.
 
@@ -119,7 +135,10 @@ COMMANDS
 
      mars dex-update market.db FROM_BLOCK TO_BLOCK [POOL]
           Fetch on-chain Uniswap V3 swap logs using ETH_RPC_URL. The default
-          pool is mainnet WETH/USDC 0.05%.
+          pool is mainnet WETH/USDC 0.05%. Dense historical ranges can lower
+          the JSON-RPC log window:
+
+               MARS_DEX_BLOCK_BATCH=500 mars dex-update market.db 24000000 24100000
 
      mars dex-export market.db dexswaps.csv [POOL]
           Export stored DEX swap observations.
@@ -157,10 +176,11 @@ DATABASE
           view. This trains an ETH spot-price movement model from on-chain
           WETH/USDC swaps, not centralized-exchange candles.
 
-          The view derives market-bar-shaped rows from real Uniswap V3 Swap
-          events. It uses sqrtPriceX96 as the spot price, actual swap sizes as
-          depth/volume inputs, Ethereum block fields when present, and FRED
-          macro observations as-of the swap timestamp.
+          The view derives one market-bar-shaped row per active minute from
+          real Uniswap V3 Swap events. It uses the last swap price in that
+          minute as the close, actual swap sizes as depth/volume inputs,
+          Ethereum block fields when present, and FRED macro observations as-of
+          the minute timestamp.
 
                export ETH_RPC_URL=http://127.0.0.1:8545
                mars dex-update market.db 19000000 19001000

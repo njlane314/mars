@@ -2,6 +2,7 @@
 #include <sqlite3.h>
 
 #include <ctype.h>
+#include <errno.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -75,6 +76,24 @@ static mars_status_t http_post_json(const char *url, const std::string &payload,
 
     *out = buf;
     return MARS_OK;
+}
+
+static uint64_t env_u64(const char *name, uint64_t fallback, uint64_t lo, uint64_t hi)
+{
+    const char *s = getenv(name);
+    char *endp = NULL;
+    unsigned long long v;
+
+    if ((s == NULL) || (s[0] == '\0')) {
+        return fallback;
+    }
+
+    errno = 0;
+    v = strtoull(s, &endp, 10);
+    if ((errno != 0) || (endp == s) || (*endp != '\0') || (v < lo) || (v > hi)) {
+        return fallback;
+    }
+    return (uint64_t)v;
 }
 
 static mars_status_t sql_exec(sqlite3 *db, const char *sql)
@@ -574,14 +593,20 @@ static int block_ts(sqlite3 *db, uint64_t block, uint64_t *ts)
     return found;
 }
 
+static int get_state(sqlite3 *db, const std::string &key, uint64_t *v);
+
 static mars_status_t set_state(sqlite3 *db, const std::string &key, uint64_t v)
 {
     sqlite3_stmt *stmt = NULL;
     char buf[64];
+    uint64_t prev = 0U;
     mars_status_t st;
 
     if (db == NULL) {
         return MARS_ERR_ARG;
+    }
+    if ((get_state(db, key, &prev) != 0) && (prev > v)) {
+        v = prev;
     }
 
     if (sqlite3_prepare_v2(db,
@@ -787,41 +812,65 @@ mars_status_t dex::schema(sqlite3 *db)
     static const char *view_sql =
         "DROP VIEW IF EXISTS dex_training_bars;"
         "CREATE VIEW dex_training_bars AS "
-        "SELECT s.ts AS ts,"
-        " s.block_number AS block_number,"
-        " s.log_index AS log_index,"
-        " s.price * (1.0 - 0.00005) AS bid,"
-        " s.price * (1.0 + 0.00005) AS ask,"
-        " s.base_amount AS bid_sz,"
-        " s.base_amount AS ask_sz,"
-        " s.quote_amount AS volume,"
+        "WITH agg AS ("
+        " SELECT (s.ts / 60) * 60 AS ts,"
+        "  count(*) AS swap_count,"
+        "  sum(s.base_amount) AS base_amount,"
+        "  sum(s.quote_amount) AS quote_amount "
+        " FROM dex_swaps s "
+        " WHERE s.pool='0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640' "
+        " AND s.price > 0.0 "
+        " AND s.base_amount > 0.0 "
+        " AND s.quote_amount > 0.0 "
+        " GROUP BY (s.ts / 60)"
+        "), last AS ("
+        " SELECT (s.ts / 60) * 60 AS ts,"
+        "  max((s.block_number * 1000000) + s.log_index) AS last_key "
+        " FROM dex_swaps s "
+        " WHERE s.pool='0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640' "
+        " AND s.price > 0.0 "
+        " AND s.base_amount > 0.0 "
+        " AND s.quote_amount > 0.0 "
+        " GROUP BY (s.ts / 60)"
+        "), close AS ("
+        " SELECT l.ts AS ts,s.block_number AS block_number,"
+        "  s.log_index AS log_index,s.price AS price "
+        " FROM last l "
+        " JOIN dex_swaps s ON ((s.block_number * 1000000) + s.log_index)=l.last_key "
+        " WHERE s.pool='0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640'"
+        ") "
+        "SELECT a.ts AS ts,"
+        " c.block_number AS block_number,"
+        " c.log_index AS log_index,"
+        " c.price * (1.0 - 0.00005) AS bid,"
+        " c.price * (1.0 + 0.00005) AS ask,"
+        " a.base_amount AS bid_sz,"
+        " a.base_amount AS ask_sz,"
+        " a.quote_amount AS volume,"
         " coalesce((1.0 * e.gas_used) / nullif(b.gas_limit,0),0.0) AS gas_util,"
-        " coalesce(e.tx_count,0) AS tx_count,"
+        " a.swap_count AS tx_count,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='DGS2' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs2,"
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs2,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='DGS10' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs10,"
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dgs10,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='T10Y2Y' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS t10y2y,"
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS t10y2y,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='VIXCLS' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS vixcls,"
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS vixcls,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='DTWEXBGS' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dtwexbgs,"
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS dtwexbgs,"
         " coalesce((SELECT value_real FROM fred_observations f "
         "  WHERE f.series_id='WALCL' AND f.value_real IS NOT NULL "
-        "  AND f.date <= date(s.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS walcl "
-        "FROM dex_swaps s "
-        "LEFT JOIN eth_blocks b ON b.number=s.block_number "
-        "LEFT JOIN eth_block_features e ON e.block_number=s.block_number "
-        "WHERE s.pool='0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640' "
-        "AND s.price > 0.0 "
-        "AND s.base_amount > 0.0 "
-        "AND s.quote_amount > 0.0;";
+        "  AND f.date <= date(a.ts,'unixepoch') ORDER BY f.date DESC LIMIT 1),0.0) AS walcl "
+        "FROM agg a "
+        "JOIN close c ON c.ts=a.ts "
+        "LEFT JOIN eth_blocks b ON b.number=c.block_number "
+        "LEFT JOIN eth_block_features e ON e.block_number=c.block_number;";
 
     mars_status_t st;
 
@@ -843,7 +892,7 @@ mars_status_t dex::update(const char *db_path, const char *rpc_url,
     uint64_t latest = 0U;
     uint64_t n;
     uint64_t done = 0U;
-    const uint64_t batch_size = 2000U;
+    const uint64_t batch_size = env_u64("MARS_DEX_BLOCK_BATCH", 2000U, 1U, 10000U);
     mars_status_t st;
 
     if ((db_path == NULL) || (rpc_url == NULL)) {
